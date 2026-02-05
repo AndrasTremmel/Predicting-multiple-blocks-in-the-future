@@ -26,7 +26,7 @@
 #include <vector>
 
 #include "utils.hpp"
-#define MAX_SECONDARY_TAG_BITS 4096
+#define SND_TAG_NO_PRED 4096
 
 /* The main history register suitable for very large history. The history is
  * implemented as a circular buffer for efficiency. The API only allows
@@ -98,7 +98,8 @@ template <int history_size>
 class Folded_History_2tag {
  public:
   Folded_History_2tag(int original_length, int compressed_length) :
-      current_value_(0), original_length_(original_length),
+      current_value_(0), 
+      original_length_(original_length),
       compressed_length_(compressed_length),
       outpoint_(original_length % compressed_length) {}
 
@@ -211,18 +212,18 @@ struct Matched_Table_Banks_2tag {
 template <class TAGE_CONFIG>
 struct Tage_Prediction_Info_2tag {
   // Overal prediction and confidence.
-  bool prediction[MAX_SECONDARY_TAG_BITS];
-  bool high_confidence[MAX_SECONDARY_TAG_BITS];
-  bool medium_confidence[MAX_SECONDARY_TAG_BITS];
-  bool low_confidence[MAX_SECONDARY_TAG_BITS];
+  bool prediction[SND_TAG_NO_PRED];
+  bool high_confidence[SND_TAG_NO_PRED];
+  bool medium_confidence[SND_TAG_NO_PRED];
+  bool low_confidence[SND_TAG_NO_PRED];
 
   // Other useful intermediate predictions.
-  bool longest_match_prediction[MAX_SECONDARY_TAG_BITS];
-  bool alt_prediction[MAX_SECONDARY_TAG_BITS];
-  bool alt_confidence[MAX_SECONDARY_TAG_BITS];
-  int  hit_bank[MAX_SECONDARY_TAG_BITS];
-  int  alt_bank[MAX_SECONDARY_TAG_BITS];
-  bool use_alt[MAX_SECONDARY_TAG_BITS];
+  bool longest_match_prediction[SND_TAG_NO_PRED];
+  bool alt_prediction[SND_TAG_NO_PRED];
+  bool alt_confidence[SND_TAG_NO_PRED];
+  int  hit_bank[SND_TAG_NO_PRED];
+  int  alt_bank[SND_TAG_NO_PRED];
+  bool use_alt[SND_TAG_NO_PRED];
 
   // Extra information needed for updates.
   int     indices[2 * TAGE_CONFIG::NUM_HISTORIES + 1];
@@ -230,6 +231,7 @@ struct Tage_Prediction_Info_2tag {
   int     num_global_history_bits;
   int64_t global_history_head_checkpoint_;
   int64_t path_history_checkpoint;
+  int64_t path_history_commit_checkpoint;
 };
 
 template <class TAGE_CONFIG>
@@ -278,6 +280,7 @@ class Tage_Histories {
 
     path_history_ = path_history_ &
                     ((1 << TAGE_CONFIG::PATH_HISTORY_WIDTH) - 1);
+    prediction_info->path_history_commit_checkpoint = path_history_;
   }
 
   void intialize_folded_history(void);
@@ -309,16 +312,19 @@ template <class TAGE_CONFIG>
 class Tage_2tag{
  public:
   Tage_2tag(Random_Number_Generator& random_number_gen, int max_in_flight_branches) :
-      tagged_table_ptrs_(), tage_histories_(max_in_flight_branches),
-      low_history_tagged_table_(), high_history_tagged_table_(),
-      alt_selector_table_(), random_number_gen_(random_number_gen) {
+      tagged_table_ptrs_(), 
+      tage_histories_(max_in_flight_branches),
+      low_history_tagged_table_(), 
+      high_history_tagged_table_(),
+      alt_selector_table_(), 
+      random_number_gen_(random_number_gen) {
     initialize_table_sizes();
     intialize_predictor_state();
   }
 
   void get_prediction(
     uint64_t br_pc, Tage_Prediction_Info_2tag<TAGE_CONFIG>* prediction_info, int tag_2) const {
-    ASSERT(0, tag_2 <= MAX_SECONDARY_TAG_BITS);
+    ASSERT(0, tag_2 <= SND_TAG_NO_PRED);
     fill_table_indices_tags(br_pc, prediction_info);
     auto& indices = prediction_info->indices;
     auto& tags    = prediction_info->tags;
@@ -396,9 +402,8 @@ class Tage_2tag{
   void commit_state(uint64_t br_pc, bool resolve_dir,
                     const Tage_Prediction_Info_2tag<TAGE_CONFIG>& prediction_info,
                     bool                                     final_prediction,
-                    Op*                                      op,
                     int                                      tag_2) {
-    ASSERT(0, tag_2 < MAX_SECONDARY_TAG_BITS);
+    ASSERT(0, tag_2 < SND_TAG_NO_PRED);
 
     const int* indices = prediction_info.indices;
     const int* tags    = prediction_info.tags;
@@ -450,7 +455,6 @@ class Tage_2tag{
     }
 
     if(allocate_new_entry) {
-      op->oracle_info.tage_alloc = true;
       int num_extra_entries_to_allocate =
         TAGE_CONFIG::EXTRA_ENTRIES_TO_ALLOCATE;
       int tick_penalty  = 0;
@@ -540,9 +544,6 @@ class Tage_2tag{
                                  (1 << TAGE_CONFIG::LOG_ENTRIES_PER_BANK));
         tick_ = 0;
       }
-    }
-    else{
-      op->oracle_info.tage_alloc=false;
     }
 
     // Update prediction
@@ -797,16 +798,6 @@ void Tage_2tag<TAGE_CONFIG>::fill_table_indices_tags(
       output->indices[i + 1] = output->indices[i] ^
                                (output->tags[i] &
                                 ((1 << TAGE_CONFIG::LOG_ENTRIES_PER_BANK) - 1));
-    }
-  }
-  if(TAGE_7TABLES) {
-    //make sure 2 ways tables are disabled
-    //this makes every 2 tables shares the index computed from the lower history table
-    ASSERT(0, TAGE_CONFIG::FIRST_2WAY_TABLE > TAGE_CONFIG::LAST_2WAY_TABLE);
-    for(int i = 1; i <= Tage_Histories<TAGE_CONFIG>::twice_num_histories_; i += 1) {
-      if(i % 4 == 0){
-        output->indices[i] = output->indices[i-2];
-      }
     }
   }
 
