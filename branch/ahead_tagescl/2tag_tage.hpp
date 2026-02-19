@@ -26,7 +26,7 @@
 #include <vector>
 
 #include "utils.hpp"
-#define SND_TAG_NO_PRED 4096
+#define SND_TAG_NO_PRED 32
 
 /* The main history register suitable for very large history. The history is
  * implemented as a circular buffer for efficiency. The API only allows

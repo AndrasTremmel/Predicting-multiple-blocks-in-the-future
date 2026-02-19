@@ -23,15 +23,48 @@
 #define SPEC_TAGE_SC_L_TAGESCL_HPP_
 
 #include "statistical_corrector.hpp"
-#include "tage.hpp"
-#include "tagescl_configs.hpp"
+#include "2tag_tage.hpp"
+#include "ahead_tagescl_configs.hpp"
 #include "utils.hpp"
+
+
+struct delay_queue_entry{
+  //std::vector<bool> future_tage_preds;
+  //std::vector<bool> tage_pred_confs;
+  //std::vector<bool> tage_pred_used;
+  bool future_tage_preds[SND_TAG_NO_PRED];
+  bool tage_pred_confs[SND_TAG_NO_PRED];
+  bool tage_pred_used[SND_TAG_NO_PRED];
+  int tage_hit_bank[SND_TAG_NO_PRED];
+  int tage_hit_index[SND_TAG_NO_PRED];
+  int tage_alt_bank[SND_TAG_NO_PRED];
+  int tage_alt_index[SND_TAG_NO_PRED];
+  int tage_use_alt[SND_TAG_NO_PRED];
+
+  uint32_t branch_id;
+  uint64_t insert_cycle;
+  uint64_t br_pc;
+  uint64_t br_npc; //(luke) next pc
+  bool current_pred;
+  bool is_ret; 
+};
+
+struct l0_btb_entry {
+    uint64_t pc;
+    uint64_t target;
+    int counter;
+
+    int use_bm_ctr;
+    bool use_bm;
+    int use_gshare_ctr;
+    bool use_gshare;
+};
 
 namespace tagescl {
 
 template <class CONFIG>
 struct Tage_SC_L_Prediction_Info {
-  Tage_Prediction_Info<typename CONFIG::TAGE> tage;
+  Tage_Prediction_Info_2tag<typename CONFIG::TAGE> tage;
   Loop_Prediction_Info<typename CONFIG::LOOP> loop;
   SC_Prediction_Info sc;
   uint64_t br_pc;
@@ -144,7 +177,7 @@ class Tage_SC_L : public Tage_SC_L_Base {
 
  private:
   Random_Number_Generator random_number_gen_;
-  Tage<typename CONFIG::TAGE> tage_;
+  Tage_2tag<typename CONFIG::TAGE> tage_;
   Statistical_Corrector<CONFIG> statistical_corrector_;
   Loop_Predictor<typename CONFIG::LOOP> loop_predictor_;
 
