@@ -53,7 +53,6 @@ struct delay_queue_entry{
   bool is_ret; 
 };
 
-std::deque<delay_queue_entry> future_tage_response_delay_queue;
 
 
 
@@ -151,6 +150,7 @@ class Tage_SC_L : public Tage_SC_L_Base {
         loop_predictor_(random_number_gen_),
         // TODO: abstract the btb characteristics into the config file
         btb_(256, 2);
+
         loop_predictor_beneficial_(-1),
         prediction_info_buffer_(max_in_flight_branches) {}
 
@@ -222,6 +222,7 @@ class Tage_SC_L : public Tage_SC_L_Base {
   Statistical_Corrector<CONFIG> statistical_corrector_;
   Loop_Predictor<typename CONFIG::LOOP> loop_predictor_;
   L0BTB btb_;
+  std::deque<delay_queue_entry> future_tage_response_delay_queue;
 
   // Counter for choosing between Tage and Loop Predictor.
   Saturating_Counter<CONFIG::CONFIDENCE_COUNTER_WIDTH, true>
