@@ -153,12 +153,12 @@ class Statistical_Corrector {
 
   void get_prediction(
       uint64_t br_pc,
-      const Tage_Prediction_Info<typename CONFIG::TAGE>& tage_prediction_info,
+      const Tage_Prediction_Info_2tag<typename CONFIG::TAGE>& tage_prediction_info_2tag,
       bool tage_or_loop_prediction, SC_Prediction_Info* prediction_info);
 
   void commit_state(
       uint64_t br_pc, bool resolve_dir,
-      const Tage_Prediction_Info<typename CONFIG::TAGE>& tage_prediction_info,
+      const Tage_Prediction_Info_2tag<typename CONFIG::TAGE>& tage_prediction_info_2tag,
       const SC_Prediction_Info& sc_prediction_info,
       bool tage_or_loop_prediction);
 
@@ -252,17 +252,17 @@ class Statistical_Corrector {
 
   int get_bias_table_index(
       uint64_t br_pc,
-      const Tage_Prediction_Info<typename CONFIG::TAGE>& tage_prediction_info,
+      const Tage_Prediction_Info_2tag<typename CONFIG::TAGE>& tage_prediction_info_2tag,
       bool tage_or_loop_prediction);
 
   int get_bias_sk_table_index(
       uint64_t br_pc,
-      const Tage_Prediction_Info<typename CONFIG::TAGE>& tage_prediction_info,
+      const Tage_Prediction_Info_2tag<typename CONFIG::TAGE>& tage_prediction_info_2tag,
       bool tage_or_loop_prediction);
 
   int get_bias_bank_table_index(
       uint64_t br_pc,
-      const Tage_Prediction_Info<typename CONFIG::TAGE>& tage_prediction_info,
+      const Tage_Prediction_Info_2tag<typename CONFIG::TAGE>& tage_prediction_info_2tag,
       bool tage_or_loop_prediction);
 
   int64_t global_history_ = 0;
@@ -360,25 +360,25 @@ Statistical_Corrector<CONFIG>::Statistical_Corrector()
 template <class CONFIG>
 void Statistical_Corrector<CONFIG>::get_prediction(
     uint64_t br_pc,
-    const Tage_Prediction_Info<typename CONFIG::TAGE>& tage_prediction_info,
+    const Tage_Prediction_Info_2tag<typename CONFIG::TAGE>& tage_prediction_info_2tag,
     bool tage_or_loop_prediction, SC_Prediction_Info* prediction_info) {
   int components_sum = 0;
   int thresholds_sum = (update_threshold_.get() >> 3) +
                        p_update_thresholds_.get_entry(br_pc).get();
 
   // Add bias.
-  int bias_table_index = get_bias_table_index(br_pc, tage_prediction_info,
+  int bias_table_index = get_bias_table_index(br_pc, tage_prediction_info_2tag,
                                               tage_or_loop_prediction);
   components_sum += 2 * bias_table_[bias_table_index].get() + 1;
 
   // Add bias_sk.
-  int bias_sk_table_index = get_bias_sk_table_index(br_pc, tage_prediction_info,
+  int bias_sk_table_index = get_bias_sk_table_index(br_pc, tage_prediction_info_2tag,
                                                     tage_or_loop_prediction);
   components_sum += 2 * bias_sk_table_[bias_sk_table_index].get() + 1;
 
   // Add bias_sk.
   int bias_bank_table_index = get_bias_bank_table_index(
-      br_pc, tage_prediction_info, tage_or_loop_prediction);
+      br_pc, tage_prediction_info_2tag, tage_or_loop_prediction);
   components_sum += 2 * bias_bank_table_[bias_bank_table_index].get() + 1;
 
   if (CONFIG::SC::USE_VARIABLE_THRESHOLD) {
@@ -455,28 +455,28 @@ void Statistical_Corrector<CONFIG>::get_prediction(
   prediction_info->thresholds_sum = thresholds_sum;
   bool sc_prediction = components_sum >= 0;
 
-#ifdef DEBUG_PRINTS
-  std::cout << "Tage pred: " << (int)tage_prediction_info.prediction
-            << std::endl;
-  std::cout << "Tage or loop pred: " << (int)tage_or_loop_prediction
-            << std::endl;
-  std::cout << "High confidence: " << (int)tage_prediction_info.high_confidence
-            << std::endl;
-  std::cout << "Medium confidence: "
-            << (int)tage_prediction_info.medium_confidence << std::endl;
-  std::cout << "Low confidence: " << (int)tage_prediction_info.low_confidence
-            << std::endl;
-  std::cout << "longest match prediction: "
-            << (int)tage_prediction_info.longest_match_prediction << std::endl;
-  std::cout << "alt prediction: " << (int)tage_prediction_info.alt_prediction
-            << std::endl;
-  std::cout << "alt confidence: " << (int)tage_prediction_info.alt_confidence
-            << std::endl;
-  std::cout << "hit bank: " << tage_prediction_info.hit_bank << std::endl;
-  std::cout << "alt bank: " << tage_prediction_info.alt_bank << std::endl;
-  std::cout << "gehl sum: " << components_sum << std::endl;
-  std::cout << "thrs sum: " << thresholds_sum << std::endl;
-#endif
+// #ifdef DEBUG_PRINTS
+//   std::cout << "Tage pred: " << (int)tage_prediction_info.prediction
+//             << std::endl;
+//   std::cout << "Tage or loop pred: " << (int)tage_or_loop_prediction
+//             << std::endl;
+//   std::cout << "High confidence: " << (int)tage_prediction_info.high_confidence
+//             << std::endl;
+//   std::cout << "Medium confidence: "
+//             << (int)tage_prediction_info.medium_confidence << std::endl;
+//   std::cout << "Low confidence: " << (int)tage_prediction_info.low_confidence
+//             << std::endl;
+//   std::cout << "longest match prediction: "
+//             << (int)tage_prediction_info.longest_match_prediction << std::endl;
+//   std::cout << "alt prediction: " << (int)tage_prediction_info.alt_prediction
+//             << std::endl;
+//   std::cout << "alt confidence: " << (int)tage_prediction_info.alt_confidence
+//             << std::endl;
+//   std::cout << "hit bank: " << tage_prediction_info.hit_bank << std::endl;
+//   std::cout << "alt bank: " << tage_prediction_info.alt_bank << std::endl;
+//   std::cout << "gehl sum: " << components_sum << std::endl;
+//   std::cout << "thrs sum: " << thresholds_sum << std::endl;
+// #endif
 
   if (sc_prediction != tage_or_loop_prediction) {
     prediction_info->prediction = sc_prediction;

@@ -139,7 +139,7 @@ uns get_recent_hist_hash(Op* op){
       if(FFP_HASH_DIR){
         res = res ^ future_tage_response_delay_queue[i].current_pred;
       }
-      for(uns j = 0; j < FFP_HASH_PC_BITS; j++){
+      for(uns j = 0; j < FFP_HASH_PC_BITS; j++){ 
         res = res ^ (current & 0x01);
         current = current >> 1;
       }

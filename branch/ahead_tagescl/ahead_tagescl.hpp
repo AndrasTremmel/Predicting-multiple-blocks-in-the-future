@@ -26,7 +26,11 @@
 #include "2tag_tage.hpp"
 #include "ahead_tagescl_configs.hpp"
 #include "utils.hpp"
+#include "btb.hpp"
+#include <deque>
 
+
+#define cycle_count 0
 
 struct delay_queue_entry{
   //std::vector<bool> future_tage_preds;
@@ -49,16 +53,51 @@ struct delay_queue_entry{
   bool is_ret; 
 };
 
-struct l0_btb_entry {
-    uint64_t pc;
-    uint64_t target;
-    int counter;
+std::deque<delay_queue_entry> future_tage_response_delay_queue;
 
-    int use_bm_ctr;
-    bool use_bm;
-    int use_gshare_ctr;
-    bool use_gshare;
-};
+
+
+uns get_recent_hist_hash()
+{
+    if (SND_TAG_NO_PRED == 1)
+        return 0;
+
+    constexpr uns TAG_BITS = __builtin_ctz(SND_TAG_NO_PRED);
+    constexpr uns TAG_MASK = SND_TAG_NO_PRED - 1;
+
+    uns res = 0;
+    uns depth = 0;
+
+    for (int i = (int)future_tage_response_delay_queue.size() - 1;
+         i >= 0 && depth < AHEAD_DISTANCE;
+         --i, ++depth)
+    {
+        const auto& entry = future_tage_response_delay_queue[i];
+
+        uint64_t current = entry.br_npc;
+
+        // 1) XOR direction
+        if (!FFP_HASH_DIR_ONLY)
+            res ^= entry.current_pred;
+
+        // 2) XOR selected PC bits
+        if (!FFP_HASH_DIR_ONLY && FFP_HASH_PC_BITS > 0) {
+            for (uns b = 0; b < FFP_HASH_PC_BITS; b++) {
+                res ^= (current >> (b + depth)) & 1;
+            }
+        }
+        else if (!FFP_HASH_DIR_ONLY && FFP_HASH_PC_BITS == 0) {
+            // Default folding: XOR folded PC chunk
+            res ^= (current ^ (current >> TAG_BITS));
+        }
+
+        // 3) Rotate-left within TAG_BITS
+        res = ((res << 1) | (res >> (TAG_BITS - 1))) & TAG_MASK;
+    }
+
+    return res & TAG_MASK;
+}
+
 
 namespace tagescl {
 
@@ -110,6 +149,8 @@ class Tage_SC_L : public Tage_SC_L_Base {
       : tage_(random_number_gen_, max_in_flight_branches),
         statistical_corrector_(),
         loop_predictor_(random_number_gen_),
+        // TODO: abstract the btb characteristics into the config file
+        btb_(256, 2);
         loop_predictor_beneficial_(-1),
         prediction_info_buffer_(max_in_flight_branches) {}
 
@@ -180,6 +221,7 @@ class Tage_SC_L : public Tage_SC_L_Base {
   Tage_2tag<typename CONFIG::TAGE> tage_;
   Statistical_Corrector<CONFIG> statistical_corrector_;
   Loop_Predictor<typename CONFIG::LOOP> loop_predictor_;
+  L0BTB btb_;
 
   // Counter for choosing between Tage and Loop Predictor.
   Saturating_Counter<CONFIG::CONFIDENCE_COUNTER_WIDTH, true>
@@ -194,6 +236,33 @@ class Tage_SC_L : public Tage_SC_L_Base {
 template <class CONFIG>
 bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc) {
   auto& prediction_info = prediction_info_buffer_[branch_id];
+
+  uns fft_picker = get_recent_hist_hash();
+
+  // Create new prediction queue entry and add it to the queue
+  delay_queue_entry temp_entry;
+
+  for(uns i = 0; i < SND_TAG_NO_PRED; i++){
+    temp_entry.future_tage_preds[i] =   tage_.get_prediction(br_pc, 
+      &prediction_info.tage, i);
+    temp_entry.tage_pred_confs[i] = prediction_info.tage.high_confidence[i];
+    temp_entry.tage_pred_used[i] = false;
+    int hit_bank = prediction_info.tage.hit_bank[i];
+    temp_entry.tage_hit_bank[i] = hit_bank;
+    temp_entry.tage_hit_index[i] = prediction_info.tage.indices[hit_bank];
+    int alt_bank = prediction_info.tage.alt_bank[i];
+    temp_entry.tage_alt_bank[i] = alt_bank;
+    temp_entry.tage_alt_index[i] = prediction_info.tage.indices[alt_bank];
+    temp_entry.tage_use_alt[i] =  prediction_info.tage.use_alt[i];
+  }            
+              
+  temp_entry.br_pc = br_pc;
+  //temp_entry.br_npc = op->oracle_info.npc;
+  temp_entry.insert_cycle = cycle_count++;
+  temp_entry.branch_id = branch_id;
+  //temp_entry.is_ret= op->table_info->cf_type == CF_RET;
+  future_tage_response_delay_queue.push_back(temp_entry);
+
 
   // First, use Tage to make a prediction.
   tage_.get_prediction(br_pc, &prediction_info.tage);
