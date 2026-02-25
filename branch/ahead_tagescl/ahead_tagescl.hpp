@@ -31,6 +31,12 @@
 
 
 #define cycle_count 0
+#define AHEAD_DISTANCE 5
+#define USE_2_BIT_COUNTER_IN_L0 1
+#define FFP_HASH_DIR 1
+#define FFP_HASH_PC_BITS 8
+#define FFP_USE_BM 1
+#define FFP_USE_LATE_PRED 0
 
 struct delay_queue_entry{
   //std::vector<bool> future_tage_preds;
@@ -56,45 +62,74 @@ struct delay_queue_entry{
 
 
 
-uns get_recent_hist_hash()
-{
-    if (SND_TAG_NO_PRED == 1)
-        return 0;
+uns get_recent_hist_hash(uint64_t br_pc){
+  if(SND_TAG_NO_PRED == 1){
+    return 0;
+  }
 
-    constexpr uns TAG_BITS = __builtin_ctz(SND_TAG_NO_PRED);
-    constexpr uns TAG_MASK = SND_TAG_NO_PRED - 1;
+  if(AHEAD_DISTANCE == 0){
+    auto pc = br_pc;
+    return ((pc>>1) ^ (pc>>4)) & 0x07;
+  }
 
-    uns res = 0;
-    uns depth = 0;
+  // Number of bits in SND_TAG_NO_PRED, i.e. log2(SND_TAG_NO_PRED)
+  const uns num_bits = __builtin_ctz(SND_TAG_NO_PRED); // valid since SND_TAG_NO_PRED is always a power of 2
+  const uns mask = SND_TAG_NO_PRED - 1;
+  const uns top_bit = SND_TAG_NO_PRED >> 1; // MSB of the result before rotation
 
-    for (int i = (int)future_tage_response_delay_queue.size() - 1;
-         i >= 0 && depth < AHEAD_DISTANCE;
-         --i, ++depth)
-    {
-        const auto& entry = future_tage_response_delay_queue[i];
+  uns res = 0;
+  uns j = 0;
 
-        uint64_t current = entry.br_npc;
+  for(int i = (int)future_tage_response_delay_queue.size() - 1; i >= 0; i--){
+    if(j == AHEAD_DISTANCE) break;
+    j++;
 
-        // 1) XOR direction
-        if (!FFP_HASH_DIR_ONLY)
-            res ^= entry.current_pred;
+    uint64_t current = future_tage_response_delay_queue[i].br_npc;
 
-        // 2) XOR selected PC bits
-        if (!FFP_HASH_DIR_ONLY && FFP_HASH_PC_BITS > 0) {
-            for (uns b = 0; b < FFP_HASH_PC_BITS; b++) {
-                res ^= (current >> (b + depth)) & 1;
-            }
-        }
-        else if (!FFP_HASH_DIR_ONLY && FFP_HASH_PC_BITS == 0) {
-            // Default folding: XOR folded PC chunk
-            res ^= (current ^ (current >> TAG_BITS));
-        }
+    res = res ^ future_tage_response_delay_queue[i].current_pred;
 
-        // 3) Rotate-left within TAG_BITS
-        res = ((res << 1) | (res >> (TAG_BITS - 1))) & TAG_MASK;
+    if(SND_TAG_NO_PRED == 2){
+      // Special case: only XOR direction (no PC bits mixed in the same way),
+      // FFP_HASH_DIR controls whether direction is XORed (already done above if FFP_HASH_DIR),
+      // and PC bits are XORed one at a time.
+      // Re-implement exactly as original:
+      res = res ^ future_tage_response_delay_queue[i].current_pred; // undo the common XOR above
+      if(FFP_HASH_DIR){
+        res = res ^ future_tage_response_delay_queue[i].current_pred;
+      }
+      for(uns k = 0; k < FFP_HASH_PC_BITS; k++){
+        res = res ^ (current & 0x01);
+        current = current >> 1;
+      }
+      // No rotation for SND_TAG_NO_PRED == 2
+      continue;
     }
 
-    return res & TAG_MASK;
+    // General case for SND_TAG_NO_PRED >= 4 (all powers of 2):
+    // Determine the PC shift based on FFP_HASH_PC_BITS
+    if(FFP_HASH_DIR_ONLY){
+      ASSERT(0, AHEAD_DISTANCE == num_bits);
+      // no PC contribution, direction already XORed above
+    } else {
+      // XOR in two shifted copies of current PC, following the pattern from the original:
+      // shift_a = FFP_HASH_PC_BITS (but for SND_TAG_NO_PRED==4 with PC_BITS==0, shift_a=0)
+      // shift_b = shift_a + num_bits
+      // Special sub-cases for small SND_TAG_NO_PRED (4) preserved via the general formula below.
+      uns shift_a = FFP_HASH_PC_BITS;
+      uns shift_b = shift_a + num_bits;
+      res = res ^ (current >> shift_a) ^ (current >> shift_b);
+      res = res & mask;
+    }
+
+    // Rotate left by 1 within num_bits (carry the MSB into LSB)
+    if(res & top_bit){
+      res = ((res << 1) + 1) & mask;
+    } else {
+      res = (res << 1) & mask;
+    }
+  }
+
+  return res;
 }
 
 
@@ -115,7 +150,7 @@ struct Tage_SC_L_Prediction_Info {
 class Tage_SC_L_Base {
  public:
   virtual uint32_t get_new_branch_id() = 0;
-  virtual bool get_prediction(uint32_t branch_id, uint64_t br_pc) = 0;
+  virtual bool get_prediction(uint32_t branch_id, uint64_t br_pc, uint64_t br_npc) = 0;
   virtual void update_speculative_state(uint32_t branch_id, uint64_t br_pc,
                                         Branch_Type br_type, bool branch_dir,
                                         uint64_t br_target) = 0;
@@ -171,7 +206,7 @@ class Tage_SC_L : public Tage_SC_L_Base {
 
   // It uses the speculative state of the predictor to generate a prediction.
   // Should be called before update_speculative_state.
-  bool get_prediction(uint32_t branch_id, uint64_t br_pc) override;
+  bool get_prediction(uint32_t branch_id, uint64_t br_pc, uint64_t br_npc) override;
 
   // It updates the speculative state (e.g. to insert history bits in Tage's
   // global history register). For conditional branches, it should be called
@@ -235,12 +270,13 @@ class Tage_SC_L : public Tage_SC_L_Base {
 };
 
 template <class CONFIG>
-bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc) {
+bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc, uint64_t br_npc) {
   auto& prediction_info = prediction_info_buffer_[branch_id];
 
-  uns fft_picker = get_recent_hist_hash();
+  // ***********************************************************
+  // * Create new prediction queue entry and add it to the queue
+  // ***********************************************************
 
-  // Create new prediction queue entry and add it to the queue
   delay_queue_entry temp_entry;
 
   for(uns i = 0; i < SND_TAG_NO_PRED; i++){
@@ -258,16 +294,66 @@ bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc) {
   }            
               
   temp_entry.br_pc = br_pc;
-  //temp_entry.br_npc = op->oracle_info.npc;
+  temp_entry.br_npc = br_npc;
   temp_entry.insert_cycle = cycle_count++;
   temp_entry.branch_id = branch_id;
+  // TODO: check if we actually need/use this field
   //temp_entry.is_ret= op->table_info->cf_type == CF_RET;
   future_tage_response_delay_queue.push_back(temp_entry);
 
 
-  // First, use Tage to make a prediction.
-  tage_.get_prediction(br_pc, &prediction_info.tage);
-  prediction_info.tage_or_loop_prediction = prediction_info.tage.prediction;
+  // ***********************************************************
+  // * Read the single cycle latency btb as a default prediction 
+  // ***********************************************************
+
+  L0BTB::Result res = btb_.probe(br_pc);
+  bool hit = res.hit;
+  bool counter_taken = res.data->counter > 1;
+  bool btb_prediction = hit;
+  if (USE_2_BIT_COUNTER_IN_L0) {
+    btb_prediction = btb_prediction && counter_taken;
+  }
+
+
+  // ***************************************************************
+  // * Compute missing history hash and select the final prediction
+  // * based on it from the right element of the prediction queue 
+  // ***************************************************************
+
+  uns fft_picker = get_recent_hist_hash(br_pc);
+  bool found_it = FALSE;
+  bool tage_pred = btb_prediction;
+  for(auto&element : future_tage_response_delay_queue) {
+    if (element.branch_id == branch_id - AHEAD_DISTANCE) {
+      found_it = TRUE;
+      bool final_pred = element.future_tage_preds[fft_picker];
+      if(element.tage_pred_used[fft_picker]){
+        // We might add some statistics logging macro to account for the conflict (STAT_EVENT(0, FFP_CONFLICT);)
+      } else{
+        element.tage_pred_used[fft_picker] = true;
+      }
+
+      if(FFP_USE_BM && res.data->use_bm && hit && AHEAD_DISTANCE != 0) {
+        tage_pred = btb_prediction;
+        break;
+      }
+
+      if((cycle_count - element.insert_cycle >= FUTURE_TAGE_LATENCY) || FFP_USE_LATE_PRED) {
+        tage_pred = final_pred;
+        break;
+      }
+      
+      break;
+    }
+  }
+
+
+  // ***************************************************************
+  // * Use the loop predictor and the statistical corrector to 
+  // * adjust the tage prediction if needed
+  // ***************************************************************
+
+  prediction_info.tage_or_loop_prediction = tage_pred;
 
   if (CONFIG::USE_LOOP_PREDICTOR) {
     // Then, look up the loop predictor and override Tage's prediction if
@@ -287,6 +373,7 @@ bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc) {
     prediction_info.final_prediction = prediction_info.sc.prediction;
   }
   return prediction_info.final_prediction;
+  // TODO: might need to save the final prediction into current_pred of the new prediction queue entry
 }
 
 template <class CONFIG>
