@@ -37,6 +37,8 @@
 #define FFP_HASH_PC_BITS 8
 #define FFP_USE_BM 1
 #define FFP_USE_LATE_PRED 0
+#define FFP_BM_THRESH 4
+#define FFP_KILL_BM_ONE_WRONG 0
 
 struct delay_queue_entry{
   //std::vector<bool> future_tage_preds;
@@ -145,6 +147,8 @@ struct Tage_SC_L_Prediction_Info {
   bool tage_or_loop_prediction;
   bool final_prediction;
   bool updated_history;
+  // Store btb predictoion for later use in commit stage
+  bool btb_prediction;
 };
 
 class Tage_SC_L_Base {
@@ -288,10 +292,13 @@ bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc, uint6
     btb_prediction = btb_prediction && counter_taken;
   }
 
+  old_prediction_info.btb_prediction = btb_prediction;
+
 
   // ***************************************************************
   // * Compute missing history hash and select the final prediction
-  // * based on it from the right element of the prediction queue 
+  // * from the right element of the prediction queue using the 
+  // * computed hash
   // ***************************************************************
 
   uns fft_picker = get_recent_hist_hash(br_pc);
@@ -394,7 +401,87 @@ bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc, uint6
 
 template <class CONFIG>
 void Tage_SC_L<CONFIG>::commit_state(uint32_t branch_id, uint64_t br_pc,
-                                     Branch_Type br_type, bool resolve_dir) {
+                                     Branch_Type br_type, bool resolve_dir, uint64_t target) {
+
+  auto& prediction_info = prediction_info_buffer_[branch_id - AHEAD_DISTANCE];
+
+
+   if(!br_type.is_indirect){ //only direct branches update the l0 btb
+
+    if(resolve_dir) {
+      auto access_res = btb_.access(br_pc);
+      if(!access_res.hit) {
+        btb_.insert(br_pc, target, 2);
+      } else {
+        if(access_res.entry.counter < 3){
+          access_res.entry.counter++;
+        }
+        bool bm_correct = resolve_dir == prediction_info.btb_prediction;
+        bool ffp_correct = resolve_dir == prediction_info.final_prediction;
+        if(FFP_USE_BM){
+          if(bm_correct && (!ffp_correct)){
+            if(access_res.entry.use_bm_ctr < 7){
+              access_res.entry.use_bm_ctr++;
+            }
+            if(access_res.entry.use_bm_ctr > FFP_BM_THRESH){
+              access_res.entry.use_bm = true;
+            }
+          }
+          else if((!bm_correct) && ffp_correct){
+            if(FFP_KILL_BM_ONE_WRONG){
+              access_res.entry.use_bm_ctr = 0;
+              access_res.entry.use_bm = false;
+            }
+            else{
+              if(access_res.entry.use_bm_ctr > -8){
+                access_res.entry.use_bm_ctr--;
+              }
+              if(access_res.entry.use_bm_ctr < FFP_FFP_THRESH){
+                access_res.entry.use_bm = false;
+              }
+            }
+          }
+        }
+      }
+    } else {
+      auto access_res = btb_.probe(br_pc);
+      bool bm_correct = resolve_dir == prediction_info.btb_prediction;
+      bool ffp_correct = resolve_dir == prediction_info.final_prediction;
+      if(access_res.hit) {
+        if(access_res.entry.counter > 0){
+          access_res.entry.counter--;
+        }
+        if(FFP_USE_BM){
+          if(bm_correct && (!ffp_correct)){
+            if(access_res.entry.use_bm_ctr < 7){
+              access_res.entry.use_bm_ctr++;
+            }
+            if(access_res.entry.use_bm_ctr > FFP_BM_THRESH){
+              access_res.entry.use_bm = true;
+            }
+          }
+          else if((!bm_correct) && ffp_correct){
+            if(FFP_KILL_BM_ONE_WRONG){
+              access_res.entry.use_bm_ctr = 0;
+              access_res.entry.use_bm = false;
+            } else {
+              if(access_res.entry.use_bm_ctr > -8){
+                access_res.entry.use_bm_ctr--;
+              }
+              if(access_res.entry.use_bm_ctr < FFP_FFP_THRESH){
+                access_res.entry.use_bm = false;
+              }
+            }
+          }
+        }
+      }
+      else if((prediction_info.btb_prediction == resolve_dir) && (prediction_info.final_prediction != resolve_dir)) {
+        btb_.insert(br_pc, target, 1);
+      }
+    }
+  }
+  
+  
   if (!br_type.is_conditional) {
     return;
   }
@@ -415,7 +502,7 @@ void Tage_SC_L<CONFIG>::commit_state(uint32_t branch_id, uint64_t br_pc,
     loop_predictor_.commit_state(
         br_pc, resolve_dir, prediction_info.loop,
         prediction_info.final_prediction != resolve_dir,
-        prediction_info.tage.prediction);
+        prediction_info.tage.final_prediction);
   }
 
   tage_.commit_state(br_pc, resolve_dir, prediction_info.tage,
