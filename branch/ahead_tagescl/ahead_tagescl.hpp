@@ -271,36 +271,10 @@ class Tage_SC_L : public Tage_SC_L_Base {
 
 template <class CONFIG>
 bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc, uint64_t br_npc) {
-  auto& prediction_info = prediction_info_buffer_[branch_id];
-
   // ***********************************************************
-  // * Create new prediction queue entry and add it to the queue
+  // * Get the prediction info for the current branch
   // ***********************************************************
-
-  delay_queue_entry temp_entry;
-
-  for(uns i = 0; i < SND_TAG_NO_PRED; i++){
-    temp_entry.future_tage_preds[i] =   tage_.get_prediction(br_pc, 
-      &prediction_info.tage, i);
-    temp_entry.tage_pred_confs[i] = prediction_info.tage.high_confidence[i];
-    temp_entry.tage_pred_used[i] = false;
-    int hit_bank = prediction_info.tage.hit_bank[i];
-    temp_entry.tage_hit_bank[i] = hit_bank;
-    temp_entry.tage_hit_index[i] = prediction_info.tage.indices[hit_bank];
-    int alt_bank = prediction_info.tage.alt_bank[i];
-    temp_entry.tage_alt_bank[i] = alt_bank;
-    temp_entry.tage_alt_index[i] = prediction_info.tage.indices[alt_bank];
-    temp_entry.tage_use_alt[i] =  prediction_info.tage.use_alt[i];
-  }            
-              
-  temp_entry.br_pc = br_pc;
-  temp_entry.br_npc = br_npc;
-  temp_entry.insert_cycle = cycle_count++;
-  temp_entry.branch_id = branch_id;
-  // TODO: check if we actually need/use this field
-  //temp_entry.is_ret= op->table_info->cf_type == CF_RET;
-  future_tage_response_delay_queue.push_back(temp_entry);
-
+  auto& old_prediction_info = prediction_info_buffer_[branch_id - AHEAD_DISTANCE];
 
   // ***********************************************************
   // * Read the single cycle latency btb as a default prediction 
@@ -323,10 +297,13 @@ bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc, uint6
   uns fft_picker = get_recent_hist_hash(br_pc);
   bool found_it = FALSE;
   bool tage_pred = btb_prediction;
+
   for(auto&element : future_tage_response_delay_queue) {
     if (element.branch_id == branch_id - AHEAD_DISTANCE) {
       found_it = TRUE;
       bool final_pred = element.future_tage_preds[fft_picker];
+      old_prediction_info.tage.final_prediction = final_pred;
+
       if(element.tage_pred_used[fft_picker]){
         // We might add some statistics logging macro to account for the conflict (STAT_EVENT(0, FFP_CONFLICT);)
       } else{
@@ -348,32 +325,71 @@ bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc, uint6
   }
 
 
+
   // ***************************************************************
   // * Use the loop predictor and the statistical corrector to 
   // * adjust the tage prediction if needed
   // ***************************************************************
 
-  prediction_info.tage_or_loop_prediction = tage_pred;
+  old_prediction_info.tage_or_loop_prediction = tage_pred;
 
   if (CONFIG::USE_LOOP_PREDICTOR) {
     // Then, look up the loop predictor and override Tage's prediction if
     // the loop predictor is found to be beneficial.
-    loop_predictor_.get_prediction(br_pc, &prediction_info.loop);
-    if (loop_predictor_beneficial_.get() >= 0 && prediction_info.loop.valid) {
-      prediction_info.tage_or_loop_prediction = prediction_info.loop.prediction;
+    loop_predictor_.get_prediction(br_pc, &old_prediction_info.loop);
+    if (loop_predictor_beneficial_.get() >= 0 && old_prediction_info.loop.valid) {
+      old_prediction_info.tage_or_loop_prediction = old_prediction_info.loop.prediction;
     }
   }
 
   if (!CONFIG::USE_SC) {
-    prediction_info.final_prediction = prediction_info.tage_or_loop_prediction;
+    old_prediction_info.final_prediction = predictold_prediction_infoion_info.tage_or_loop_prediction;
   } else {
     statistical_corrector_.get_prediction(
-        br_pc, prediction_info.tage, prediction_info.tage_or_loop_prediction,
-        &prediction_info.sc);
-    prediction_info.final_prediction = prediction_info.sc.prediction;
+        br_pc, old_prediction_info.tage, old_prediction_info.tage_or_loop_prediction,
+        &old_prediction_info.sc);
+    old_prediction_info.final_prediction = old_prediction_info.sc.prediction;
   }
-  return prediction_info.final_prediction;
   // TODO: might need to save the final prediction into current_pred of the new prediction queue entry
+
+
+
+  // ***********************************************************
+  // * Create new prediction queue entry and add it to the queue
+  // ***********************************************************
+
+  auto& new_prediction_info = prediction_info_buffer_[branch_id];
+  new_prediction_info.tage.final_prediction = False;
+
+  delay_queue_entry temp_entry;
+
+  for(uns i = 0; i < SND_TAG_NO_PRED; i++){
+    temp_entry.future_tage_preds[i] =   tage_.get_prediction(br_pc, 
+      &new_prediction_info.tage, i);
+    temp_entry.tage_pred_confs[i] = new_prediction_info.tage.high_confidence[i];
+    temp_entry.tage_pred_used[i] = false;
+    int hit_bank = new_prediction_info.tage.hit_bank[i];
+    temp_entry.tage_hit_bank[i] = hit_bank;
+    temp_entry.tage_hit_index[i] = new_prediction_info.tage.indices[hit_bank];
+    int alt_bank = new_prediction_info.tage.alt_bank[i];
+    temp_entry.tage_alt_bank[i] = alt_bank;
+    temp_entry.tage_alt_index[i] = new_prediction_info.tage.indices[alt_bank];
+    temp_entry.tage_use_alt[i] =  new_prediction_info.tage.use_alt[i];
+  }            
+              
+  temp_entry.br_pc = br_pc;
+  temp_entry.br_npc = br_npc;
+  temp_entry.insert_cycle = cycle_count++;
+  temp_entry.branch_id = branch_id;
+  temp_entry.current_pred = final_prediction;
+  // TODO: check if we actually need/use this field
+  //temp_entry.is_ret= op->table_info->cf_type == CF_RET;
+  future_tage_response_delay_queue.push_back(temp_entry);
+
+
+
+  return old_prediction_info.final_prediction;
+
 }
 
 template <class CONFIG>
@@ -382,7 +398,7 @@ void Tage_SC_L<CONFIG>::commit_state(uint32_t branch_id, uint64_t br_pc,
   if (!br_type.is_conditional) {
     return;
   }
-  auto& prediction_info = prediction_info_buffer_[branch_id];
+  auto& prediction_info = prediction_info_buffer_[branch_id - AHEAD_DISTANCE];
   if (CONFIG::USE_SC) {
     statistical_corrector_.commit_state(
         br_pc, resolve_dir, prediction_info.tage, prediction_info.sc,

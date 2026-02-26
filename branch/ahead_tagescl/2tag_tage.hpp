@@ -232,6 +232,7 @@ struct Tage_Prediction_Info_2tag {
   int64_t global_history_head_checkpoint_;
   int64_t path_history_checkpoint;
   int64_t path_history_commit_checkpoint;
+  bool final_prediction;
 };
 
 template <class TAGE_CONFIG>
