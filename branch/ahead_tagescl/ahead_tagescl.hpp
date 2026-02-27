@@ -485,7 +485,7 @@ void Tage_SC_L<CONFIG>::commit_state(uint32_t branch_id, uint64_t br_pc,
   if (!br_type.is_conditional) {
     return;
   }
-  auto& prediction_info = prediction_info_buffer_[branch_id - AHEAD_DISTANCE];
+
   if (CONFIG::USE_SC) {
     statistical_corrector_.commit_state(
         br_pc, resolve_dir, prediction_info.tage, prediction_info.sc,
@@ -518,7 +518,7 @@ void Tage_SC_L<CONFIG>::flush_branch_and_repair_state(uint32_t branch_id,
   // First iterate over all flushed branches from youngest to oldest and call
   // local recovery functions.
   for (uint32_t id = prediction_info_buffer_.back_id();
-       id - branch_id < (uint32_t{1} << 31); --id) {
+       id - (branch_id - AHEAD_DISTANCE) < (uint32_t{1} << 31); --id) {
     auto& prediction_info = prediction_info_buffer_[id];
     tage_.local_recover_speculative_state(prediction_info.tage);
     if (CONFIG::USE_LOOP_PREDICTOR) {
@@ -529,10 +529,10 @@ void Tage_SC_L<CONFIG>::flush_branch_and_repair_state(uint32_t branch_id,
           prediction_info.br_pc, prediction_info.sc);
     }
   }
-  prediction_info_buffer_.deallocate_after(branch_id);
+  prediction_info_buffer_.deallocate_after(branch_id - AHEAD_DISTANCE);
 
   // Now call global recovery functions.
-  auto& prediction_info = prediction_info_buffer_[branch_id];
+  auto& prediction_info = prediction_info_buffer_[branch_id - AHEAD_DISTANCE];
   tage_.global_recover_speculative_state(prediction_info.tage);
   if (CONFIG::USE_LOOP_PREDICTOR) {
     loop_predictor_.global_recover_speculative_state(prediction_info.loop);
@@ -554,6 +554,26 @@ void Tage_SC_L<CONFIG>::flush_branch_and_repair_state(uint32_t branch_id,
     statistical_corrector_.update_speculative_state(
         br_pc, resolve_dir, br_target, br_type, &prediction_info.sc);
   }
+
+  // Count the number of elements of the prediction queue to flush 
+  // and then remove them oen by one
+  uns nums_to_pop = 0;
+  for(uint32_t i = future_tage_response_delay_queue.size() - 1; i >= 0 ; i--){
+    delay_queue_entry temp = future_tage_response_delay_queue[i];
+    if(temp.branch_id > branch_id - AHEAD_DISTANCE){
+      nums_to_pop++;
+    }
+    else{
+      break;
+    }
+  }
+
+  for(uns i = 0; i < nums_to_pop; i++){
+    future_tage_response_delay_queue.pop_back();
+  }
+
+  // Update the mispredicted branch's delay queue entry with the correct prediction
+  future_tage_response_delay_queue.back().current_pred = resolve_dir;
 }
 
 template <class CONFIG>
@@ -561,7 +581,7 @@ void Tage_SC_L<CONFIG>::flush_branch(uint32_t branch_id) {
   // First iterate over all flushed branches from youngest to oldest and
   // call local recovery functions.
   for (uint32_t id = prediction_info_buffer_.back_id();
-       id - branch_id < (uint32_t{1} << 31); --id) {
+       id - (branch_id - AHEAD_DISTANCE) < (uint32_t{1} << 31); --id) {
     auto& prediction_info = prediction_info_buffer_[id];
     tage_.local_recover_speculative_state(prediction_info.tage);
     if (CONFIG::USE_LOOP_PREDICTOR) {
@@ -586,6 +606,27 @@ void Tage_SC_L<CONFIG>::flush_branch(uint32_t branch_id) {
   }
 
   random_number_gen_.seed_ = prediction_info.rng_seed;
+
+  // Count the number of elements of the prediction queue to flush 
+  // and then remove them oen by one
+  uns nums_to_pop = 0;
+  for(uint32_t i = future_tage_response_delay_queue.size() - 1; i >= 0 ; i--){
+    delay_queue_entry temp = future_tage_response_delay_queue[i];
+    if(temp.branch_id > branch_id - AHEAD_DISTANCE){
+      nums_to_pop++;
+    }
+    else{
+      break;
+    }
+  }
+
+  for(uns i = 0; i < nums_to_pop; i++){
+    future_tage_response_delay_queue.pop_back();
+  }
+
+  // Update the mispredicted branch's delay queue entry with the correct prediction
+  future_tage_response_delay_queue.back().current_pred = resolve_dir;
+
 }
 
 template <class CONFIG>
@@ -594,20 +635,29 @@ void Tage_SC_L<CONFIG>::commit_state_at_retire(uint32_t branch_id,
                                                Branch_Type br_type,
                                                bool resolve_dir,
                                                uint64_t br_target) {
-  auto& prediction_info = prediction_info_buffer_[branch_id];
+  auto& prediction_info = prediction_info_buffer_[branch_id - AHEAD_DISTANCE];
   if (prediction_info.updated_history) {
     if (CONFIG::USE_LOOP_PREDICTOR) {
       loop_predictor_.commit_state_at_retire(
         br_pc, resolve_dir, prediction_info.loop,
         prediction_info.final_prediction != resolve_dir,
-        prediction_info.tage.prediction);
+        prediction_info.tage.final_prediction);
     }
     tage_.commit_state_at_retire(prediction_info.tage);
     if (CONFIG::USE_SC) {
       statistical_corrector_.commit_state_at_retire();
     }
   }
-  prediction_info_buffer_.deallocate_front(branch_id);
+  prediction_info_buffer_.deallocate_front(branch_id - AHEAD_DISTANCE);
+  // Remove the corresponding delay queue entry as well whose branch_id
+  // should also be branch_id - AHEAD_DISTANCE
+  future_tage_response_delay_queue.pop_front();
+
+
+//   while (!future_tage_response_delay_queue.empty() && 
+//        future_tage_response_delay_queue.front().branch_id <= branch_id - AHEAD_DISTANCE) {
+//     future_tage_response_delay_queue.pop_front();
+// }
 }
 
 template <class CONFIG>
