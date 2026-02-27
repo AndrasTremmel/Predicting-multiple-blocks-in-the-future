@@ -274,7 +274,7 @@ class Tage_SC_L : public Tage_SC_L_Base {
 };
 
 template <class CONFIG>
-bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc, uint64_t br_npc) {
+bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc) {
   // ***********************************************************
   // * Get the prediction info for the current branch
   // ***********************************************************
@@ -357,7 +357,6 @@ bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc, uint6
         &old_prediction_info.sc);
     old_prediction_info.final_prediction = old_prediction_info.sc.prediction;
   }
-  // TODO: might need to save the final prediction into current_pred of the new prediction queue entry
 
 
 
@@ -385,10 +384,10 @@ bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc, uint6
   }            
               
   temp_entry.br_pc = br_pc;
-  temp_entry.br_npc = br_npc;
+  //temp_entry.br_npc = br_npc;
   temp_entry.insert_cycle = cycle_count++;
   temp_entry.branch_id = branch_id;
-  temp_entry.current_pred = final_prediction;
+  temp_entry.current_pred = old_prediction_info.final_prediction;
   // TODO: check if we actually need/use this field
   //temp_entry.is_ret= op->table_info->cf_type == CF_RET;
   future_tage_response_delay_queue.push_back(temp_entry);
@@ -672,7 +671,7 @@ void Tage_SC_L<CONFIG>::update_speculative_state(uint32_t branch_id,
                                                  Branch_Type br_type,
                                                  bool branch_dir,
                                                  uint64_t br_target) {
-  auto& prediction_info = prediction_info_buffer_[branch_id];
+  auto& prediction_info = prediction_info_buffer_[branch_id - AHEAD_DISTANCE];
   prediction_info.rng_seed = random_number_gen_.seed_;
   prediction_info.updated_history = true;
   tage_.update_speculative_state(br_pc, br_target, br_type, branch_dir,
@@ -685,6 +684,9 @@ void Tage_SC_L<CONFIG>::update_speculative_state(uint32_t branch_id,
         br_pc, branch_dir, br_target, br_type, &prediction_info.sc);
   }
   prediction_info.br_pc = br_pc;
+
+  future_tage_response_delay_queue.back().current_pred = branch_dir;
+  future_tage_response_delay_queue.back().br_npc = br_target;
 }
 
 }  // namespace tagescl
