@@ -22,7 +22,7 @@
 #ifndef SPEC_TAGE_SC_L_TAGESCL_HPP_
 #define SPEC_TAGE_SC_L_TAGESCL_HPP_
 
-#include "statistical_corrector.hpp"
+//#include "statistical_corrector.hpp"
 #include "2tag_tage.hpp"
 #include "ahead_tagescl_configs.hpp"
 #include "utils.hpp"
@@ -350,11 +350,11 @@ namespace tagescl {
 template <class CONFIG>
 struct Tage_SC_L_Prediction_Info {
   Tage_Prediction_Info_2tag<typename CONFIG::TAGE> tage;
-  Loop_Prediction_Info<typename CONFIG::LOOP> loop;
-  SC_Prediction_Info sc;
+  //Loop_Prediction_Info<typename CONFIG::LOOP> loop;
+  //SC_Prediction_Info sc;
   uint64_t br_pc;
   int rng_seed;
-  bool tage_or_loop_prediction;
+  //bool tage_or_loop_prediction;
   bool final_prediction;
   bool updated_history;
   // Store btb predictoion for later use in commit stage
@@ -395,12 +395,12 @@ class Tage_SC_L : public Tage_SC_L_Base {
  public:
   Tage_SC_L(int max_in_flight_branches)
       : tage_(random_number_gen_, max_in_flight_branches),
-        statistical_corrector_(),
-        loop_predictor_(random_number_gen_),
+        //statistical_corrector_(),
+        //loop_predictor_(random_number_gen_),
         // TODO: abstract the btb characteristics into the config file
         btb_(256, 2);
 
-        loop_predictor_beneficial_(-1),
+        //loop_predictor_beneficial_(-1),
         prediction_info_buffer_(max_in_flight_branches) {}
 
   // Gets a new branch_id for a new in-flight branch. The id remains valid
@@ -412,8 +412,8 @@ class Tage_SC_L : public Tage_SC_L_Base {
     uint32_t branch_id = prediction_info_buffer_.allocate_back();
     auto& prediction_info = prediction_info_buffer_[branch_id];
     Tage<typename CONFIG::TAGE>::build_empty_prediction(&prediction_info.tage);
-    Loop_Predictor<typename CONFIG::LOOP>::build_empty_prediction(
-        &prediction_info.loop);
+    //Loop_Predictor<typename CONFIG::LOOP>::build_empty_prediction(
+    //    &prediction_info.loop);
     prediction_info.updated_history = false;
     return branch_id;
   }
@@ -468,19 +468,19 @@ class Tage_SC_L : public Tage_SC_L_Base {
  private:
   Random_Number_Generator random_number_gen_;
   Tage_2tag<typename CONFIG::TAGE> tage_;
-  Statistical_Corrector<CONFIG> statistical_corrector_;
-  Loop_Predictor<typename CONFIG::LOOP> loop_predictor_;
+  //Statistical_Corrector<CONFIG> statistical_corrector_;
+  //Loop_Predictor<typename CONFIG::LOOP> loop_predictor_;
   L0BTB btb_;
   std::deque<delay_queue_entry> future_tage_response_delay_queue;
 
   // Counter for choosing between Tage and Loop Predictor.
-  Saturating_Counter<CONFIG::CONFIDENCE_COUNTER_WIDTH, true>
-      loop_predictor_beneficial_;
+  // Saturating_Counter<CONFIG::CONFIDENCE_COUNTER_WIDTH, true>
+  //     loop_predictor_beneficial_;
 
   // Used for remembering necessary information gathered during prediction
   // that
   // are needed for update.
-  Circular_Buffer<Tage_SC_L_Prediction_Info<CONFIG>> prediction_info_buffer_;
+  CircularBuffer<Tage_SC_L_Prediction_Info<CONFIG>> prediction_info_buffer_;
 };
 
 template <class CONFIG>
@@ -488,7 +488,7 @@ bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc) {
   // ***********************************************************
   // * Get the prediction info for the current branch
   // ***********************************************************
-  auto& old_prediction_info = prediction_info_buffer_[branch_id - AHEAD_DISTANCE];
+  auto& old_prediction_info = prediction_info_buffer_[branch_id];
 
   // ***********************************************************
   // * Read the single cycle latency btb as a default prediction 

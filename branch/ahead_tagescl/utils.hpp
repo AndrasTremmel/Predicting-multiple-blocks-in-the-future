@@ -23,6 +23,9 @@
 #define SPEC_TAGE_SC_L_UTILS_HPP_
 
 #include <cassert>
+#include <vector>
+#include <cstdint>
+#include <optional>
 
 namespace tagescl {
 
@@ -146,57 +149,189 @@ struct Branch_Type {
   bool is_indirect;
 };
 
+// template <typename T>
+// class Circular_Buffer {
+//  public:
+//   Circular_Buffer(unsigned max_size)
+//       : buffer_(1 << get_min_num_bits_to_represent(max_size)),
+//         buffer_access_mask_(buffer_.size() - 1),
+//         back_(-1),
+//         front_(-1),
+//         size_(0) {}
+
+//   T& operator[](uint32_t id) {
+//     assert(back_ - id < back_ - front_);
+//     return buffer_[id & buffer_access_mask_];
+//   }
+
+//   uint32_t back_id() const { return back_; }
+
+//   void deallocate_after(uint32_t id) {
+//     assert(back_ - id < back_ - front_);
+//     size_ -= (back_ - id);
+//     back_ = id;
+//   }
+
+//   void deallocate_and_after(uint32_t id) {
+//     assert((back_ - id + 1) < (back_ - front_ + 1));
+//     size_ -= (back_ - id + 1);
+//     back_ = id - 1;
+//   }
+
+//   uint32_t allocate_back() {
+//     assert(size_ < buffer_.size());
+//     back_ += 1;
+//     size_ += 1;
+//     return back_;
+//   }
+
+//   void deallocate_front(uint32_t pop_id) {
+//     front_ += 1;
+//     assert(pop_id == front_);
+//     assert(size_ > 0);
+//     size_ -= 1;
+//   }
+
+//  private:
+//   std::vector<T> buffer_;
+//   uint32_t buffer_access_mask_;
+
+//   uint32_t back_;
+//   uint32_t front_;
+//   uint32_t size_;
+// };
+
+
+
+
+
 template <typename T>
-class Circular_Buffer {
- public:
-  Circular_Buffer(unsigned max_size)
-      : buffer_(1 << get_min_num_bits_to_represent(max_size)),
-        buffer_access_mask_(buffer_.size() - 1),
-        back_(-1),
-        front_(-1),
-        size_(0) {}
+class CircularBuffer {
+public:
+    CircularBuffer(size_t inflight_branches,
+                      size_t ahead_distance)
+        : capacity_(inflight_branches + ahead_distance),
+          buffer_(capacity_),
+          valid_(capacity_, false),
+          read_id_(0),
+          alloc_id_(ahead_distance)
+    {
+        assert(capacity_ > 0);
+    }
 
-  T& operator[](uint32_t id) {
-    assert(back_ - id < back_ - front_);
-    return buffer_[id & buffer_access_mask_];
-  }
+    size_t get_capacity() const { return capacity_; }
 
-  uint32_t back_id() const { return back_; }
+    uint64_t get_read_id() const { return read_id_; }
 
-  void deallocate_after(uint32_t id) {
-    assert(back_ - id < back_ - front_);
-    size_ -= (back_ - id);
-    back_ = id;
-  }
+    uint64_t next_alloc_id() const { return alloc_id_; }
 
-  void deallocate_and_after(uint32_t id) {
-    assert((back_ - id + 1) < (back_ - front_ + 1));
-    size_ -= (back_ - id + 1);
-    back_ = id - 1;
-  }
 
-  uint32_t allocate_back() {
-    assert(size_ < buffer_.size());
-    back_ += 1;
-    size_ += 1;
-    return back_;
-  }
+    // Allocate next sequential branch slot
+    uint64_t allocate()
+    {
+        assert(size() < capacity_ && "Buffer overflow");
 
-  void deallocate_front(uint32_t pop_id) {
-    front_ += 1;
-    assert(pop_id == front_);
-    assert(size_ > 0);
-    size_ -= 1;
-  }
+        uint64_t id = next_alloc_id_;
+        size_t idx = physical_index(id);
 
- private:
-  std::vector<T> buffer_;
-  uint32_t buffer_access_mask_;
+        valid_[idx] = true;
+        next_alloc_id_++;
 
-  uint32_t back_;
-  uint32_t front_;
-  uint32_t size_;
+        return id;
+    }
+
+
+
+    bool contains(uint64_t id) const
+    {
+        return (id >= read_id_) &&
+               (id < next_alloc_id_);
+    }
+
+    T& get(uint64_t id)
+    {
+        assert(contains(id));
+        size_t idx = physical_index(id);
+        assert(valid_[idx]);
+        return buffer_[idx];
+    }
+
+    T& operator[](uint64_t id) {
+      assert(contains(id));
+      size_t idx = physical_index(id);
+      assert(valid_[idx]);
+      return buffer_[idx];    
+    }
+
+
+
+    void write(uint64_t id, const T& value)
+    {
+        assert(contains(id));
+        size_t idx = physical_index(id);
+        buffer_[idx] = value;
+        valid_[idx] = true;
+    }
+
+
+    // Advance read pointer by one (commit one branch)
+    void advance_read()
+    {
+        assert(!empty());
+
+        size_t idx = physical_index(read_id_);
+        valid_[idx] = false;
+
+        read_id_++;
+    }
+
+    // Advance read pointer to specific branch ID
+    void advance_read_to(uint64_t new_read_id)
+    {
+        assert(new_read_id >= read_id_);
+        assert(new_read_id <= next_alloc_id_);
+
+        while (read_id_ < new_read_id) {
+            advance_read();
+        }
+    }
+
+    // ===============================
+    // Flush (used on mispredict)
+    // ===============================
+
+    // Remove all entries with id >= from_id
+    void flush_from(uint64_t from_id)
+    {
+        assert(from_id >= read_id_);
+        assert(from_id <= next_alloc_id_);
+
+        for (uint64_t id = from_id; id < next_alloc_id_; ++id) {
+            size_t idx = physical_index(id);
+            valid_[idx] = false;
+        }
+
+        next_alloc_id_ = from_id;
+    }
+
+private:
+    size_t physical_index(uint64_t id) const
+    {
+        return static_cast<size_t>(id % capacity_);
+    }
+
+private:
+    size_t capacity_;
+
+    std::vector<T> buffer_;
+    std::vector<bool> valid_;
+
+    uint64_t read_id_;        // Oldest valid branch
+    uint64_t next_alloc_id_;  // Next branch ID to allocate
 };
+
+
+
 
 }  // namespace tagescl
 
