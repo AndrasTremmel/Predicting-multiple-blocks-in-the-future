@@ -9,7 +9,7 @@ struct L0BTBEntry {
 
     int counter = 0;          // 2-bit saturating counter (0–3)
 
-    int use_bm_ctr = 0;       // override confidence counter (-8 to 7)
+    int use_bm_ctr = 0;       // 3-bit confidence counter (0-7)
     bool use_bm = false;
 
     int use_gshare_ctr = 0;   // (optional)

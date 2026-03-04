@@ -36,8 +36,11 @@
 #define FFP_HASH_PC_BITS 8
 #define FFP_USE_BM 1
 #define FFP_USE_LATE_PRED 0
-#define FFP_BM_THRESH 4
+#define FFP_BM_THRESH 2
 #define FFP_KILL_BM_ONE_WRONG 0
+
+#define L0_BTB_SIZE 1024
+#define L0_BTB_ASSOC 4
 
 struct delay_queue_entry{
   //std::vector<bool> future_tage_preds;
@@ -359,6 +362,7 @@ struct Tage_SC_L_Prediction_Info {
   bool updated_history;
   // Store btb predictoion for later use in commit stage
   bool btb_prediction;
+  bool tage_prediction_valid = false;
 };
 
 class Tage_SC_L_Base {
@@ -398,29 +402,31 @@ class Tage_SC_L : public Tage_SC_L_Base {
         //statistical_corrector_(),
         //loop_predictor_(random_number_gen_),
         // TODO: abstract the btb characteristics into the config file
-        btb_(256, 2);
+        btb_(L0_BTB_SIZE, L0_BTB_ASSOC);
 
         //loop_predictor_beneficial_(-1),
-        prediction_info_buffer_(max_in_flight_branches) {}
+        prediction_info_buffer_(max_in_flight_branches, AHEAD_DISTANCE) {}
 
   // Gets a new branch_id for a new in-flight branch. The id remains valid
   // until
   // the branch is retired or flushed. The class internally maintains metadata
   // for each in-flight branch. The rest of the public functions in this class
   // need the id of a branch to work on.
+
+  // TODO: change the new branch id giving function
   uint32_t get_new_branch_id() override {
-    uint32_t branch_id = prediction_info_buffer_.allocate_back();
-    auto& prediction_info = prediction_info_buffer_[branch_id];
-    Tage<typename CONFIG::TAGE>::build_empty_prediction(&prediction_info.tage);
+    uint32_t branch_id = prediction_info_buffer_.get_read_id_();
+    //auto& prediction_info = prediction_info_buffer_[branch_id];
+    //Tage<typename CONFIG::TAGE>::build_empty_prediction(&prediction_info.tage);
     //Loop_Predictor<typename CONFIG::LOOP>::build_empty_prediction(
     //    &prediction_info.loop);
-    prediction_info.updated_history = false;
+    //prediction_info.updated_history = false;
     return branch_id;
   }
 
   // It uses the speculative state of the predictor to generate a prediction.
   // Should be called before update_speculative_state.
-  bool get_prediction(uint32_t branch_id, uint64_t br_pc, uint64_t br_npc) override;
+  bool get_prediction(uint32_t branch_id, uint64_t br_pc) override;
 
   // It updates the speculative state (e.g. to insert history bits in Tage's
   // global history register). For conditional branches, it should be called
@@ -488,7 +494,10 @@ bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc) {
   // ***********************************************************
   // * Get the prediction info for the current branch
   // ***********************************************************
-  auto& old_prediction_info = prediction_info_buffer_[branch_id];
+  auto& prediction_info = prediction_info_buffer_[branch_id];
+
+  // Update branch pc since it was unkown up until now
+  prediction_info.br_pc = br_pc;
 
   // ***********************************************************
   // * Read the single cycle latency btb as a default prediction 
@@ -496,77 +505,82 @@ bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc) {
 
   L0BTB::Result res = btb_.probe(br_pc);
   bool hit = res.hit;
-  bool counter_taken = res.data->counter > 1;
+  bool counter_taken = hit ? res.entry->counter > 1 : 0;
   bool btb_prediction = hit;
   if (USE_2_BIT_COUNTER_IN_L0) {
     btb_prediction = btb_prediction && counter_taken;
   }
 
-  old_prediction_info.btb_prediction = btb_prediction;
+  prediction_info.btb_prediction = btb_prediction;
+
+  bool final_pred = btb_prediction;
 
 
   // ***************************************************************
   // * Compute missing history hash and select the final prediction
   // * from the right element of the prediction queue using the 
-  // * computed hash
+  // * computed hash if prediction info contains ahead tage prediction
   // ***************************************************************
 
-  uns fft_picker = get_recent_hist_hash(br_pc);
-  bool found_it = FALSE;
-  bool tage_pred = btb_prediction;
+  if(prediction_info.tage_prediction_valid) {
+    uns fft_picker = get_recent_hist_hash(br_pc);
+    bool found_it = FALSE;
 
-  for(auto&element : future_tage_response_delay_queue) {
-    if (element.branch_id == branch_id - AHEAD_DISTANCE) {
-      found_it = TRUE;
-      bool final_pred = element.future_tage_preds[fft_picker];
-      old_prediction_info.tage.final_prediction = final_pred;
+    for(auto&element : future_tage_response_delay_queue) {
+      if (element.branch_id == branch_id) {
+        found_it = TRUE;
+        bool tage_pred = element.future_tage_preds[fft_picker];
+        prediction_info.tage.final_prediction = tage_pred;
 
-      if(element.tage_pred_used[fft_picker]){
-        // We might add some statistics logging macro to account for the conflict (STAT_EVENT(0, FFP_CONFLICT);)
-      } else{
-        element.tage_pred_used[fft_picker] = true;
-      }
+        if(element.tage_pred_used[fft_picker]){
+          // We might add some statistics logging macro to account for the conflict (STAT_EVENT(0, FFP_CONFLICT);)
+        } else{
+          element.tage_pred_used[fft_picker] = true;
+        }
 
-      if(FFP_USE_BM && res.data->use_bm && hit && AHEAD_DISTANCE != 0) {
-        tage_pred = btb_prediction;
+        if(FFP_USE_BM && res.data->use_bm && hit && AHEAD_DISTANCE != 0) {
+          final_pred = btb_prediction;
+          break;
+        }
+
+        if((cycle_count - element.insert_cycle >= FUTURE_TAGE_LATENCY) || FFP_USE_LATE_PRED) {
+          final_pred = tage_pred;
+          break;
+        }
+        
         break;
       }
-
-      if((cycle_count - element.insert_cycle >= FUTURE_TAGE_LATENCY) || FFP_USE_LATE_PRED) {
-        tage_pred = final_pred;
-        break;
-      }
-      
-      break;
     }
   }
 
+  prediction_info.final_prediction = final_pred;
+  
 
 
-  // ***************************************************************
-  // * Use the loop predictor and the statistical corrector to 
-  // * adjust the tage prediction if needed
-  // ***************************************************************
+  // // ***************************************************************
+  // // * Use the loop predictor and the statistical corrector to 
+  // // * adjust the tage prediction if needed
+  // // ***************************************************************
 
-  old_prediction_info.tage_or_loop_prediction = tage_pred;
+  // old_prediction_info.tage_or_loop_prediction = final_pred;
 
-  if (CONFIG::USE_LOOP_PREDICTOR) {
-    // Then, look up the loop predictor and override Tage's prediction if
-    // the loop predictor is found to be beneficial.
-    loop_predictor_.get_prediction(br_pc, &old_prediction_info.loop);
-    if (loop_predictor_beneficial_.get() >= 0 && old_prediction_info.loop.valid) {
-      old_prediction_info.tage_or_loop_prediction = old_prediction_info.loop.prediction;
-    }
-  }
+  // if (CONFIG::USE_LOOP_PREDICTOR) {
+  //   // Then, look up the loop predictor and override Tage's prediction if
+  //   // the loop predictor is found to be beneficial.
+  //   loop_predictor_.get_prediction(br_pc, &old_prediction_info.loop);
+  //   if (loop_predictor_beneficial_.get() >= 0 && old_prediction_info.loop.valid) {
+  //     old_prediction_info.tage_or_loop_prediction = old_prediction_info.loop.prediction;
+  //   }
+  // }
 
-  if (!CONFIG::USE_SC) {
-    old_prediction_info.final_prediction = predictold_prediction_infoion_info.tage_or_loop_prediction;
-  } else {
-    statistical_corrector_.get_prediction(
-        br_pc, old_prediction_info.tage, old_prediction_info.tage_or_loop_prediction,
-        &old_prediction_info.sc);
-    old_prediction_info.final_prediction = old_prediction_info.sc.prediction;
-  }
+  // if (!CONFIG::USE_SC) {
+  //   old_prediction_info.final_prediction = predictold_prediction_infoion_info.tage_or_loop_prediction;
+  // } else {
+  //   statistical_corrector_.get_prediction(
+  //       br_pc, old_prediction_info.tage, old_prediction_info.tage_or_loop_prediction,
+  //       &old_prediction_info.sc);
+  //   old_prediction_info.final_prediction = old_prediction_info.sc.prediction;
+  // }
 
 
 
@@ -574,37 +588,38 @@ bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc) {
   // * Create new prediction queue entry and add it to the queue
   // ***********************************************************
 
-  auto& new_prediction_info = prediction_info_buffer_[branch_id];
-  new_prediction_info.tage.final_prediction = False;
+  auto& future_prediction_info = prediction_info_buffer_[branch_id + AHEAD_DISTANCE];
+  future_prediction_info.tage.final_prediction = false;
+  future_prediction_info.tage_prediction_valid = true;
+
 
   delay_queue_entry temp_entry;
 
   for(uns i = 0; i < SND_TAG_NO_PRED; i++){
-    temp_entry.future_tage_preds[i] =   tage_.get_prediction(br_pc, 
-      &new_prediction_info.tage, i);
-    temp_entry.tage_pred_confs[i] = new_prediction_info.tage.high_confidence[i];
+    temp_entry.future_tage_preds[i] =   tage_.get_prediction(br_pc, &future_prediction_info.tage, i);
+    temp_entry.tage_pred_confs[i] = future_prediction_info.tage.high_confidence[i];
     temp_entry.tage_pred_used[i] = false;
-    int hit_bank = new_prediction_info.tage.hit_bank[i];
+    int hit_bank = future_prediction_info.tage.hit_bank[i];
     temp_entry.tage_hit_bank[i] = hit_bank;
-    temp_entry.tage_hit_index[i] = new_prediction_info.tage.indices[hit_bank];
-    int alt_bank = new_prediction_info.tage.alt_bank[i];
+    temp_entry.tage_hit_index[i] = future_prediction_info.tage.indices[hit_bank];
+    int alt_bank = future_prediction_info.tage.alt_bank[i];
     temp_entry.tage_alt_bank[i] = alt_bank;
-    temp_entry.tage_alt_index[i] = new_prediction_info.tage.indices[alt_bank];
-    temp_entry.tage_use_alt[i] =  new_prediction_info.tage.use_alt[i];
+    temp_entry.tage_alt_index[i] = future_prediction_info.tage.indices[alt_bank];
+    temp_entry.tage_use_alt[i] =  future_prediction_info.tage.use_alt[i];
   }            
               
   temp_entry.br_pc = br_pc;
   //temp_entry.br_npc = br_npc;
-  temp_entry.insert_cycle = cycle_count++;
-  temp_entry.branch_id = branch_id;
-  temp_entry.current_pred = old_prediction_info.final_prediction;
+  temp_entry.insert_cycle = cycle_count;
+  temp_entry.branch_id = branch_id + AHEAD_DISTANCE;
+  //temp_entry.current_pred = prediction_info.final_prediction;
   // TODO: check if we actually need/use this field
   //temp_entry.is_ret= op->table_info->cf_type == CF_RET;
   future_tage_response_delay_queue.push_back(temp_entry);
 
 
 
-  return old_prediction_info.final_prediction;
+  return prediction_info.final_prediction;
 
 }
 
@@ -612,7 +627,7 @@ template <class CONFIG>
 void Tage_SC_L<CONFIG>::commit_state(uint32_t branch_id, uint64_t br_pc,
                                      Branch_Type br_type, bool resolve_dir, uint64_t target) {
 
-  auto& prediction_info = prediction_info_buffer_[branch_id - AHEAD_DISTANCE];
+  auto& prediction_info = prediction_info_buffer_[branch_id];
 
 
    if(!br_type.is_indirect){ //only direct branches update the l0 btb
@@ -622,31 +637,31 @@ void Tage_SC_L<CONFIG>::commit_state(uint32_t branch_id, uint64_t br_pc,
       if(!access_res.hit) {
         btb_.insert(br_pc, target, 2);
       } else {
-        if(access_res.entry.counter < 3){
-          access_res.entry.counter++;
+        if(access_res.entry->counter < 3){
+          access_res.entry->counter++;
         }
         bool bm_correct = resolve_dir == prediction_info.btb_prediction;
         bool ffp_correct = resolve_dir == prediction_info.final_prediction;
         if(FFP_USE_BM){
           if(bm_correct && (!ffp_correct)){
-            if(access_res.entry.use_bm_ctr < 7){
-              access_res.entry.use_bm_ctr++;
+            if(access_res.entry->use_bm_ctr < 7){
+              access_res.entry->use_bm_ctr++;
             }
-            if(access_res.entry.use_bm_ctr > FFP_BM_THRESH){
-              access_res.entry.use_bm = true;
+            if(access_res.entry->use_bm_ctr > FFP_BM_THRESH){
+              access_res.entry->use_bm = true;
             }
           }
           else if((!bm_correct) && ffp_correct){
             if(FFP_KILL_BM_ONE_WRONG){
-              access_res.entry.use_bm_ctr = 0;
-              access_res.entry.use_bm = false;
+              access_res.entry->use_bm_ctr = 0;
+              access_res.entry->use_bm = false;
             }
             else{
-              if(access_res.entry.use_bm_ctr > -8){
-                access_res.entry.use_bm_ctr--;
+              if(access_res.entry->use_bm_ctr > 0){
+                access_res.entry->use_bm_ctr--;
               }
-              if(access_res.entry.use_bm_ctr < FFP_FFP_THRESH){
-                access_res.entry.use_bm = false;
+              if(access_res.entry->use_bm_ctr <= FFP_FFP_THRESH){
+                access_res.entry->use_bm = false;
               }
             }
           }
@@ -657,28 +672,28 @@ void Tage_SC_L<CONFIG>::commit_state(uint32_t branch_id, uint64_t br_pc,
       bool bm_correct = resolve_dir == prediction_info.btb_prediction;
       bool ffp_correct = resolve_dir == prediction_info.final_prediction;
       if(access_res.hit) {
-        if(access_res.entry.counter > 0){
-          access_res.entry.counter--;
+        if(access_res.entry->counter > 0){
+          access_res.entry->counter--;
         }
         if(FFP_USE_BM){
           if(bm_correct && (!ffp_correct)){
-            if(access_res.entry.use_bm_ctr < 7){
-              access_res.entry.use_bm_ctr++;
+            if(access_res.entry->use_bm_ctr < 7){
+              access_res.entry->use_bm_ctr++;
             }
-            if(access_res.entry.use_bm_ctr > FFP_BM_THRESH){
-              access_res.entry.use_bm = true;
+            if(access_res.entry->use_bm_ctr > FFP_BM_THRESH){
+              access_res.entry->use_bm = true;
             }
           }
           else if((!bm_correct) && ffp_correct){
             if(FFP_KILL_BM_ONE_WRONG){
-              access_res.entry.use_bm_ctr = 0;
-              access_res.entry.use_bm = false;
+              access_res.entry->use_bm_ctr = 0;
+              access_res.entry->use_bm = false;
             } else {
-              if(access_res.entry.use_bm_ctr > -8){
-                access_res.entry.use_bm_ctr--;
+              if(access_res.entry->use_bm_ctr > 0){
+                access_res.entry->use_bm_ctr--;
               }
-              if(access_res.entry.use_bm_ctr < FFP_FFP_THRESH){
-                access_res.entry.use_bm = false;
+              if(access_res.entry->use_bm_ctr <= FFP_FFP_THRESH){
+                access_res.entry->use_bm = false;
               }
             }
           }
@@ -695,29 +710,36 @@ void Tage_SC_L<CONFIG>::commit_state(uint32_t branch_id, uint64_t br_pc,
     return;
   }
 
-  if (CONFIG::USE_SC) {
-    statistical_corrector_.commit_state(
-        br_pc, resolve_dir, prediction_info.tage, prediction_info.sc,
-        prediction_info.tage_or_loop_prediction);
-  }
+  // if (CONFIG::USE_SC) {
+  //   statistical_corrector_.commit_state(
+  //       br_pc, resolve_dir, prediction_info.tage, prediction_info.sc,
+  //       prediction_info.tage_or_loop_prediction);
+  // }
 
-  if (CONFIG::USE_LOOP_PREDICTOR) {
-    if (prediction_info.loop.valid) {
-      if (prediction_info.final_prediction != prediction_info.loop.prediction) {
-        loop_predictor_beneficial_.update(resolve_dir ==
-                                          prediction_info.loop.prediction);
-      }
-    }
-    loop_predictor_.commit_state(
-        br_pc, resolve_dir, prediction_info.loop,
-        prediction_info.final_prediction != resolve_dir,
-        prediction_info.tage.final_prediction);
-  }
+  // if (CONFIG::USE_LOOP_PREDICTOR) {
+  //   if (prediction_info.loop.valid) {
+  //     if (prediction_info.final_prediction != prediction_info.loop.prediction) {
+  //       loop_predictor_beneficial_.update(resolve_dir ==
+  //                                         prediction_info.loop.prediction);
+  //     }
+  //   }
+  //   loop_predictor_.commit_state(
+  //       br_pc, resolve_dir, prediction_info.loop,
+  //       prediction_info.final_prediction != resolve_dir,
+  //       prediction_info.tage.final_prediction);
+  // }
 
   tage_.commit_state(br_pc, resolve_dir, prediction_info.tage,
                      prediction_info.final_prediction);
 }
 
+
+
+  // ***********************************************************
+  // * We do not use the recover functions in ChampSim since we 
+  // * only have 1 in-flight branch at any time, so there is no
+  // * need for a rollback and flush
+  // ***********************************************************
 template <class CONFIG>
 void Tage_SC_L<CONFIG>::flush_branch_and_repair_state(uint32_t branch_id,
                                                       uint64_t br_pc,
@@ -727,7 +749,7 @@ void Tage_SC_L<CONFIG>::flush_branch_and_repair_state(uint32_t branch_id,
   // First iterate over all flushed branches from youngest to oldest and call
   // local recovery functions.
   for (uint32_t id = prediction_info_buffer_.back_id();
-       id - (branch_id - AHEAD_DISTANCE) < (uint32_t{1} << 31); --id) {
+       id - branch_id < (uint32_t{1} << 31); --id) {
     auto& prediction_info = prediction_info_buffer_[id];
     tage_.local_recover_speculative_state(prediction_info.tage);
     if (CONFIG::USE_LOOP_PREDICTOR) {
@@ -738,10 +760,10 @@ void Tage_SC_L<CONFIG>::flush_branch_and_repair_state(uint32_t branch_id,
           prediction_info.br_pc, prediction_info.sc);
     }
   }
-  prediction_info_buffer_.deallocate_after(branch_id - AHEAD_DISTANCE);
+  prediction_info_buffer_.deallocate_after(branch_id);
 
   // Now call global recovery functions.
-  auto& prediction_info = prediction_info_buffer_[branch_id - AHEAD_DISTANCE];
+  auto& prediction_info = prediction_info_buffer_[branch_id];
   tage_.global_recover_speculative_state(prediction_info.tage);
   if (CONFIG::USE_LOOP_PREDICTOR) {
     loop_predictor_.global_recover_speculative_state(prediction_info.loop);
@@ -763,34 +785,21 @@ void Tage_SC_L<CONFIG>::flush_branch_and_repair_state(uint32_t branch_id,
     statistical_corrector_.update_speculative_state(
         br_pc, resolve_dir, br_target, br_type, &prediction_info.sc);
   }
-
-  // Count the number of elements of the prediction queue to flush 
-  // and then remove them oen by one
-  uns nums_to_pop = 0;
-  for(uint32_t i = future_tage_response_delay_queue.size() - 1; i >= 0 ; i--){
-    delay_queue_entry temp = future_tage_response_delay_queue[i];
-    if(temp.branch_id > branch_id - AHEAD_DISTANCE){
-      nums_to_pop++;
-    }
-    else{
-      break;
-    }
-  }
-
-  for(uns i = 0; i < nums_to_pop; i++){
-    future_tage_response_delay_queue.pop_back();
-  }
-
-  // Update the mispredicted branch's delay queue entry with the correct prediction
-  future_tage_response_delay_queue.back().current_pred = resolve_dir;
 }
 
+
+
+// ***********************************************************
+// * We do not use the recover functions in ChampSim since we 
+// * only have 1 in-flight branch at any time, so there is no
+// * need for a rollback and flush
+// ***********************************************************
 template <class CONFIG>
 void Tage_SC_L<CONFIG>::flush_branch(uint32_t branch_id) {
   // First iterate over all flushed branches from youngest to oldest and
   // call local recovery functions.
   for (uint32_t id = prediction_info_buffer_.back_id();
-       id - (branch_id - AHEAD_DISTANCE) < (uint32_t{1} << 31); --id) {
+       id - branch_id < (uint32_t{1} << 31); --id) {
     auto& prediction_info = prediction_info_buffer_[id];
     tage_.local_recover_speculative_state(prediction_info.tage);
     if (CONFIG::USE_LOOP_PREDICTOR) {
@@ -815,27 +824,6 @@ void Tage_SC_L<CONFIG>::flush_branch(uint32_t branch_id) {
   }
 
   random_number_gen_.seed_ = prediction_info.rng_seed;
-
-  // Count the number of elements of the prediction queue to flush 
-  // and then remove them oen by one
-  uns nums_to_pop = 0;
-  for(uint32_t i = future_tage_response_delay_queue.size() - 1; i >= 0 ; i--){
-    delay_queue_entry temp = future_tage_response_delay_queue[i];
-    if(temp.branch_id > branch_id - AHEAD_DISTANCE){
-      nums_to_pop++;
-    }
-    else{
-      break;
-    }
-  }
-
-  for(uns i = 0; i < nums_to_pop; i++){
-    future_tage_response_delay_queue.pop_back();
-  }
-
-  // Update the mispredicted branch's delay queue entry with the correct prediction
-  future_tage_response_delay_queue.back().current_pred = resolve_dir;
-
 }
 
 template <class CONFIG>
@@ -844,35 +832,34 @@ void Tage_SC_L<CONFIG>::commit_state_at_retire(uint32_t branch_id,
                                                Branch_Type br_type,
                                                bool resolve_dir,
                                                uint64_t br_target) {
-  auto& prediction_info = prediction_info_buffer_[branch_id - AHEAD_DISTANCE];
+  auto& prediction_info = prediction_info_buffer_[branch_id];
   if (prediction_info.updated_history) {
-    if (CONFIG::USE_LOOP_PREDICTOR) {
-      loop_predictor_.commit_state_at_retire(
-        br_pc, resolve_dir, prediction_info.loop,
-        prediction_info.final_prediction != resolve_dir,
-        prediction_info.tage.final_prediction);
-    }
+    // if (CONFIG::USE_LOOP_PREDICTOR) {
+    //   loop_predictor_.commit_state_at_retire(
+    //     br_pc, resolve_dir, prediction_info.loop,
+    //     prediction_info.final_prediction != resolve_dir,
+    //     prediction_info.tage.final_prediction);
+    // }
     tage_.commit_state_at_retire(prediction_info.tage);
-    if (CONFIG::USE_SC) {
-      statistical_corrector_.commit_state_at_retire();
-    }
+    // if (CONFIG::USE_SC) {
+    //   statistical_corrector_.commit_state_at_retire();
+    // }
   }
-  prediction_info_buffer_.deallocate_front(branch_id - AHEAD_DISTANCE);
-  // Remove the corresponding delay queue entry as well whose branch_id
-  // should also be branch_id - AHEAD_DISTANCE
-  future_tage_response_delay_queue.pop_front();
-
-
-//   while (!future_tage_response_delay_queue.empty() && 
-//        future_tage_response_delay_queue.front().branch_id <= branch_id - AHEAD_DISTANCE) {
-//     future_tage_response_delay_queue.pop_front();
-// }
+  prediction_info_buffer_.deallocate_front(branch_id);
+  // Remove the corresponding delay queue entry which should
+  // be the front element if there is a prediction queue entry
+  // for this branch. Notice that for the first AHEAD_DISTANCE
+  // branches we do not have an entry in the prediction queue
+  if(future_tage_response_delay_queue.front().branch_id == branch_id) {
+    future_tage_response_delay_queue.pop_front();
+  }
 }
 
 template <class CONFIG>
 void Tage_SC_L<CONFIG>::retire_non_branch_ip(uint32_t branch_id) {
   // std::cerr << "retire_non_branch_ip(" << branch_id << ")\n";
-  prediction_info_buffer_.deallocate_front(branch_id);
+  //prediction_info_buffer_.deallocate_front(branch_id);
+  future_tage_response_delay_queue.pop_back();
 }
 
 template <class CONFIG>
@@ -881,19 +868,18 @@ void Tage_SC_L<CONFIG>::update_speculative_state(uint32_t branch_id,
                                                  Branch_Type br_type,
                                                  bool branch_dir,
                                                  uint64_t br_target) {
-  auto& prediction_info = prediction_info_buffer_[branch_id - AHEAD_DISTANCE];
+  auto& prediction_info = prediction_info_buffer_[branch_id];
   prediction_info.rng_seed = random_number_gen_.seed_;
   prediction_info.updated_history = true;
   tage_.update_speculative_state(br_pc, br_target, br_type, branch_dir,
                                  &prediction_info.tage);
-  if (CONFIG::USE_LOOP_PREDICTOR) {
-    loop_predictor_.update_speculative_state(prediction_info.loop);
-  }
-  if (CONFIG::USE_SC) {
-    statistical_corrector_.update_speculative_state(
-        br_pc, branch_dir, br_target, br_type, &prediction_info.sc);
-  }
-  prediction_info.br_pc = br_pc;
+  // if (CONFIG::USE_LOOP_PREDICTOR) {
+  //   loop_predictor_.update_speculative_state(prediction_info.loop);
+  // }
+  // if (CONFIG::USE_SC) {
+  //   statistical_corrector_.update_speculative_state(
+  //       br_pc, branch_dir, br_target, br_type, &prediction_info.sc);
+  // }
 
   future_tage_response_delay_queue.back().current_pred = branch_dir;
   future_tage_response_delay_queue.back().br_npc = br_target;

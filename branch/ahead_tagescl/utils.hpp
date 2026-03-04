@@ -221,57 +221,55 @@ public:
 
     size_t get_capacity() const { return capacity_; }
 
-    uint64_t get_read_id() const { return read_id_; }
+    uint32_t get_read_id() const { return read_id_; }
 
-    uint64_t next_alloc_id() const { return alloc_id_; }
-
-
-    // Allocate next sequential branch slot
-    uint64_t allocate()
-    {
-        assert(size() < capacity_ && "Buffer overflow");
-
-        uint64_t id = next_alloc_id_;
-        size_t idx = physical_index(id);
-
-        valid_[idx] = true;
-        next_alloc_id_++;
-
-        return id;
-    }
+    uint32_t get_alloc_id() const { return alloc_id_; }
 
 
+    // // Allocate next sequential branch slot
+    // uint32_t allocate()
+    // {
+    //     assert(size() < capacity_ && "Buffer overflow");
 
-    bool contains(uint64_t id) const
+    //     uint32_t id = next_alloc_id_;
+    //     size_t idx = physical_index(id);
+
+    //     valid_[idx] = true;
+    //     next_alloc_id_++;
+
+    //     return id;
+    // }
+
+
+
+    bool contains(uint32_t id) const
     {
         return (id >= read_id_) &&
-               (id < next_alloc_id_);
+               (id <= alloc_id_);
     }
 
-    T& get(uint64_t id)
-    {
-        assert(contains(id));
-        size_t idx = physical_index(id);
-        assert(valid_[idx]);
-        return buffer_[idx];
-    }
 
-    T& operator[](uint64_t id) {
+    T& operator[](uint32_t id) {
       assert(contains(id));
       size_t idx = physical_index(id);
       assert(valid_[idx]);
       return buffer_[idx];    
     }
 
-
-
-    void write(uint64_t id, const T& value)
-    {
-        assert(contains(id));
-        size_t idx = physical_index(id);
-        buffer_[idx] = value;
-        valid_[idx] = true;
+    void deallocate_front(uint32_t pop_id) {
+      assert(pop_id == read_id_);
+      size_t idx = physical_index(read_id_);
+      valid_[idx] = false;
+      read_id_++;
+      alloc_id_++;
     }
+
+    void validate(uint32_t id) {
+      assert(contains(id));
+      size_t idx = physical_index(id);
+      valid_[idx] = true;
+    }
+
 
 
     // Advance read pointer by one (commit one branch)
@@ -285,37 +283,27 @@ public:
         read_id_++;
     }
 
-    // Advance read pointer to specific branch ID
-    void advance_read_to(uint64_t new_read_id)
-    {
-        assert(new_read_id >= read_id_);
-        assert(new_read_id <= next_alloc_id_);
-
-        while (read_id_ < new_read_id) {
-            advance_read();
-        }
-    }
 
     // ===============================
     // Flush (used on mispredict)
     // ===============================
 
     // Remove all entries with id >= from_id
-    void flush_from(uint64_t from_id)
-    {
-        assert(from_id >= read_id_);
-        assert(from_id <= next_alloc_id_);
+    // void flush_from(uint32_t from_id)
+    // {
+    //     assert(from_id >= read_id_);
+    //     assert(from_id <= alloc_id_);
 
-        for (uint64_t id = from_id; id < next_alloc_id_; ++id) {
-            size_t idx = physical_index(id);
-            valid_[idx] = false;
-        }
+    //     for (uint32_t id = from_id; id < alloc_id_; ++id) {
+    //         size_t idx = physical_index(id);
+    //         valid_[idx] = false;
+    //     }
 
-        next_alloc_id_ = from_id;
-    }
+    //     alloc_id_ = from_id;
+    // }
 
 private:
-    size_t physical_index(uint64_t id) const
+    size_t physical_index(uint32_t id) const
     {
         return static_cast<size_t>(id % capacity_);
     }
@@ -326,8 +314,8 @@ private:
     std::vector<T> buffer_;
     std::vector<bool> valid_;
 
-    uint64_t read_id_;        // Oldest valid branch
-    uint64_t next_alloc_id_;  // Next branch ID to allocate
+    uint32_t read_id_;        // Oldest valid branch
+    uint32_t alloc_id_;  // Next branch ID to allocate
 };
 
 
