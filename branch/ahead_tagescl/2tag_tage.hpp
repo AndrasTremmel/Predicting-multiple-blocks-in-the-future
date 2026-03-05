@@ -232,6 +232,7 @@ struct Tage_Prediction_Info_2tag {
   int64_t global_history_head_checkpoint_;
   int64_t path_history_checkpoint;
   int64_t path_history_commit_checkpoint;
+  int tag2;
   bool final_prediction;
 };
 
@@ -598,8 +599,7 @@ class Tage_2tag{
 
   void commit_state_at_retire(
     const Tage_Prediction_Info_2tag<TAGE_CONFIG>& prediction_info) {
-    tage_histories_.history_register_.retire(
-      prediction_info.num_global_history_bits);
+    tage_histories_.history_register_.retire(prediction_info.num_global_history_bits);
     tage_histories_.path_history_old_ = tage_histories_.path_history_;
   }
 

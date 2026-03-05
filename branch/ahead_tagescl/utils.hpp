@@ -226,40 +226,39 @@ public:
     uint32_t get_alloc_id() const { return alloc_id_; }
 
 
-    // // Allocate next sequential branch slot
-    // uint32_t allocate()
-    // {
-    //     assert(size() < capacity_ && "Buffer overflow");
 
-    //     uint32_t id = next_alloc_id_;
-    //     size_t idx = physical_index(id);
-
-    //     valid_[idx] = true;
-    //     next_alloc_id_++;
-
-    //     return id;
-    // }
-
-
-
-    bool contains(uint32_t id) const
-    {
-        return (id >= read_id_) &&
-               (id <= alloc_id_);
+    bool contains(uint32_t id) const {
+        return (id >= read_id_) && (id <= alloc_id_);
     }
 
 
     T& operator[](uint32_t id) {
       assert(contains(id));
       size_t idx = physical_index(id);
-      assert(valid_[idx]);
+      if(id == alloc_id_) {
+        valid_[idx] = true;
+      } else {
+        assert(valid_[idx]);
+      }
       return buffer_[idx];    
+    }
+
+
+    void clear(uint32_t id) {
+      assert(contains(id));
+      size_t idx = physical_index(id);
+
+      // Reset the stored object using its default constructor
+      buffer_[idx] = T{};
+
+      // Mark the entry as invalid
+      valid_[idx] = false;
     }
 
     void deallocate_front(uint32_t pop_id) {
       assert(pop_id == read_id_);
       size_t idx = physical_index(read_id_);
-      valid_[idx] = false;
+      clear(pop_id);
       read_id_++;
       alloc_id_++;
     }
@@ -270,18 +269,6 @@ public:
       valid_[idx] = true;
     }
 
-
-
-    // Advance read pointer by one (commit one branch)
-    void advance_read()
-    {
-        assert(!empty());
-
-        size_t idx = physical_index(read_id_);
-        valid_[idx] = false;
-
-        read_id_++;
-    }
 
 
     // ===============================

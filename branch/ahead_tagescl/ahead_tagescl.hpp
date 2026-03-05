@@ -359,7 +359,7 @@ struct Tage_SC_L_Prediction_Info {
   int rng_seed;
   //bool tage_or_loop_prediction;
   bool final_prediction;
-  bool updated_history;
+  bool updated_history = false;
   // Store btb predictoion for later use in commit stage
   bool btb_prediction;
   bool tage_prediction_valid = false;
@@ -531,6 +531,7 @@ bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc) {
         found_it = TRUE;
         bool tage_pred = element.future_tage_preds[fft_picker];
         prediction_info.tage.final_prediction = tage_pred;
+        prediction_info.tage.tag2 = (int) fft_picker;
 
         if(element.tage_pred_used[fft_picker]){
           // We might add some statistics logging macro to account for the conflict (STAT_EVENT(0, FFP_CONFLICT);)
@@ -705,10 +706,6 @@ void Tage_SC_L<CONFIG>::commit_state(uint32_t branch_id, uint64_t br_pc,
     }
   }
   
-  
-  if (!br_type.is_conditional) {
-    return;
-  }
 
   // if (CONFIG::USE_SC) {
   //   statistical_corrector_.commit_state(
@@ -728,9 +725,10 @@ void Tage_SC_L<CONFIG>::commit_state(uint32_t branch_id, uint64_t br_pc,
   //       prediction_info.final_prediction != resolve_dir,
   //       prediction_info.tage.final_prediction);
   // }
-
-  tage_.commit_state(br_pc, resolve_dir, prediction_info.tage,
-                     prediction_info.final_prediction);
+  if(prediction_info.tage_prediction_valid) {
+    tage_.commit_state(br_pc, resolve_dir, prediction_info.tage,
+        prediction_info.final_prediction, prediction_info.tage.tag2);
+  }
 }
 
 
@@ -844,14 +842,15 @@ void Tage_SC_L<CONFIG>::commit_state_at_retire(uint32_t branch_id,
     // if (CONFIG::USE_SC) {
     //   statistical_corrector_.commit_state_at_retire();
     // }
-  }
-  prediction_info_buffer_.deallocate_front(branch_id);
-  // Remove the corresponding delay queue entry which should
-  // be the front element if there is a prediction queue entry
-  // for this branch. Notice that for the first AHEAD_DISTANCE
-  // branches we do not have an entry in the prediction queue
-  if(future_tage_response_delay_queue.front().branch_id == branch_id) {
-    future_tage_response_delay_queue.pop_front();
+
+    prediction_info_buffer_.deallocate_front(branch_id);
+    // Remove the corresponding delay queue entry which should
+    // be the front element if there is a prediction queue entry
+    // for this branch. Notice that for the first AHEAD_DISTANCE
+    // branches we do not have an entry in the prediction queue
+    if(future_tage_response_delay_queue.front().branch_id == branch_id) {
+      future_tage_response_delay_queue.pop_front();
+    }
   }
 }
 
