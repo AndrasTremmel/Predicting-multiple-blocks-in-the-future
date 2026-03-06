@@ -4,7 +4,7 @@
 #include <iostream>
 
 #include "ooo_cpu.h"
-#include "tagescl.hpp"
+#include "ahead_tagescl.hpp"
 
 struct ChampsimTageScl {
   using Impl = tagescl::Tage_SC_L<tagescl::CONFIG_64KB>;
@@ -51,7 +51,7 @@ std::uint8_t O3_CPU::predict_branch(std::uint64_t ip) {
                                           0, 0);
   }
   predictor.id = predictor.impl.get_new_branch_id();
-  bool prediction = predictor.impl.get_prediction(predictor.id, ip);
+  bool prediction = predictor.impl.get_prediction(predictor.id, ip, current_cycle);
   predictor.last_ip = ip;
   predictor.state = ChampsimTageScl::PREDICTED;
   return prediction;

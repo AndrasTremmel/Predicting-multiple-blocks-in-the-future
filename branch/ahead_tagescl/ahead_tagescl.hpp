@@ -29,6 +29,8 @@
 #include "btb.hpp"
 #include <deque>
 
+typedef unsigned int uns;
+
 
 #define AHEAD_DISTANCE 5
 #define USE_2_BIT_COUNTER_IN_L0 1
@@ -36,6 +38,7 @@
 #define FFP_HASH_PC_BITS 8
 #define FFP_USE_BM 1
 #define FFP_USE_LATE_PRED 0
+#define FUTURE_TAGE_LATENCY 3
 #define FFP_BM_THRESH 2
 #define FFP_KILL_BM_ONE_WRONG 0
 
@@ -402,7 +405,7 @@ class Tage_SC_L : public Tage_SC_L_Base {
         //statistical_corrector_(),
         //loop_predictor_(random_number_gen_),
         // TODO: abstract the btb characteristics into the config file
-        btb_(L0_BTB_SIZE, L0_BTB_ASSOC);
+        btb_(L0_BTB_SIZE, L0_BTB_ASSOC),
 
         //loop_predictor_beneficial_(-1),
         prediction_info_buffer_(max_in_flight_branches, AHEAD_DISTANCE) {}
@@ -426,7 +429,7 @@ class Tage_SC_L : public Tage_SC_L_Base {
 
   // It uses the speculative state of the predictor to generate a prediction.
   // Should be called before update_speculative_state.
-  bool get_prediction(uint32_t branch_id, uint64_t br_pc) override;
+  bool get_prediction(uint32_t branch_id, uint64_t br_pc, uint64_t current_cycle) override;
 
   // It updates the speculative state (e.g. to insert history bits in Tage's
   // global history register). For conditional branches, it should be called
@@ -490,7 +493,7 @@ class Tage_SC_L : public Tage_SC_L_Base {
 };
 
 template <class CONFIG>
-bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc) {
+bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc, uint64_t current_cycle) {
   // ***********************************************************
   // * Get the prediction info for the current branch
   // ***********************************************************
@@ -544,7 +547,7 @@ bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc) {
           break;
         }
 
-        if((cycle_count - element.insert_cycle >= FUTURE_TAGE_LATENCY) || FFP_USE_LATE_PRED) {
+        if((current_cycle - element.insert_cycle >= FUTURE_TAGE_LATENCY) || FFP_USE_LATE_PRED) {
           final_pred = tage_pred;
           break;
         }
@@ -611,7 +614,7 @@ bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc) {
               
   temp_entry.br_pc = br_pc;
   //temp_entry.br_npc = br_npc;
-  temp_entry.insert_cycle = cycle_count;
+  temp_entry.insert_cycle = current_cycle;
   temp_entry.branch_id = branch_id + AHEAD_DISTANCE;
   //temp_entry.current_pred = prediction_info.final_prediction;
   // TODO: check if we actually need/use this field
