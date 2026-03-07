@@ -26,7 +26,11 @@
 #include <vector>
 
 #include "utils.hpp"
+#include <cassert>
 #define SND_TAG_NO_PRED 32
+#define AHEAD_SINGLE_BIMODAL 1
+
+namespace tagescl {
 
 /* The main history register suitable for very large history. The history is
  * implemented as a circular buffer for efficiency. The API only allows
@@ -326,7 +330,7 @@ class Tage_2tag{
 
   void get_prediction(
     uint64_t br_pc, Tage_Prediction_Info_2tag<TAGE_CONFIG>* prediction_info, int tag_2) const {
-    ASSERT(0, tag_2 <= SND_TAG_NO_PRED);
+    assert(tag_2 < SND_TAG_NO_PRED);
     fill_table_indices_tags(br_pc, prediction_info);
     auto& indices = prediction_info->indices;
     auto& tags    = prediction_info->tags;
@@ -405,7 +409,7 @@ class Tage_2tag{
                     const Tage_Prediction_Info_2tag<TAGE_CONFIG>& prediction_info,
                     bool                                     final_prediction,
                     int                                      tag_2) {
-    ASSERT(0, tag_2 < SND_TAG_NO_PRED);
+    assert(tag_2 < SND_TAG_NO_PRED);
 
     const int* indices = prediction_info.indices;
     const int* tags    = prediction_info.tags;
@@ -901,6 +905,8 @@ void Tage_2tag<TAGE_CONFIG>::shift_tage_useful_bits(Tagged_Entry* table, int siz
   for(int i = 0; i < size; ++i) {
     table[i].useful.set(table[i].useful.get() >> 1);
   }
+}
+
 }
 
 #endif  // __TAGE_H_

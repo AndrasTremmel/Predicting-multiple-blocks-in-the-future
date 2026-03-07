@@ -212,7 +212,7 @@ public:
                       size_t ahead_distance)
         : capacity_(inflight_branches + ahead_distance),
           buffer_(capacity_),
-          valid_(capacity_, false),
+        //valid_(capacity_, false),
           read_id_(0),
           alloc_id_(ahead_distance)
     {
@@ -235,11 +235,11 @@ public:
     T& operator[](uint32_t id) {
       assert(contains(id));
       size_t idx = physical_index(id);
-      if(id == alloc_id_) {
-        valid_[idx] = true;
-      } else {
-        assert(valid_[idx]);
-      }
+      // if(id == alloc_id_) {
+      //   valid_[idx] = true;
+      // } else {
+      //   assert(valid_[idx]);
+      // }
       return buffer_[idx];    
     }
 
@@ -252,22 +252,21 @@ public:
       buffer_[idx] = T{};
 
       // Mark the entry as invalid
-      valid_[idx] = false;
+      //valid_[idx] = false;
     }
 
     void deallocate_front(uint32_t pop_id) {
       assert(pop_id == read_id_);
-      size_t idx = physical_index(read_id_);
       clear(pop_id);
       read_id_++;
       alloc_id_++;
     }
 
-    void validate(uint32_t id) {
-      assert(contains(id));
-      size_t idx = physical_index(id);
-      valid_[idx] = true;
-    }
+    // void validate(uint32_t id) {
+    //   assert(contains(id));
+    //   size_t idx = physical_index(id);
+    //   valid_[idx] = true;
+    // }
 
 
 
@@ -299,7 +298,7 @@ private:
     size_t capacity_;
 
     std::vector<T> buffer_;
-    std::vector<bool> valid_;
+    //std::vector<bool> valid_;
 
     uint32_t read_id_;        // Oldest valid branch
     uint32_t alloc_id_;  // Next branch ID to allocate
