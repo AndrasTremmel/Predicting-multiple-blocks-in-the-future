@@ -495,7 +495,7 @@ uns Tage_SC_L<CONFIG>::get_recent_hist_hash(uint64_t br_pc) {
       assert(false);
     }
   }
-  //std::cout << "Calculated missing history hash for branch pc " << br_pc << "is" << res << std::endl;
+  //std::cout << "Calculated missing history hash for branch pc " << br_pc << " is " << res << std::endl;
   return res;
 }
 
@@ -504,7 +504,7 @@ bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc, uint6
   // ***********************************************************
   // * Get the prediction info for the current branch
   // ***********************************************************
-  //std::cout << "Starting prediction for branch id:: " << branch_id << "and branch pc: " << br_pc << std::endl;
+  //std::cout << "Starting prediction for branch id:: " << branch_id << " and branch pc: " << br_pc << std::endl;
   auto& prediction_info = prediction_info_buffer_[branch_id];
 
   // Update branch pc since it was unkown up until now
@@ -548,11 +548,13 @@ bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc, uint6
         prediction_info.tage.final_prediction = tage_pred;
         //std::cout << "Set final prediction info to be tage prediction..." << std::endl;
         prediction_info.tage.tag2 = (int) fft_picker;
-        //std::cout << "Casted unsigned int hash to integer..," << std::endl;
+        //std::cout << "Casted unsigned int hash to integer..." << std::endl;
 
         if(element.tage_pred_used[fft_picker]){
           //std::cout << "Prediction has already been used..." << std::endl;
-          // We might add some statistics logging macro to account for the conflict (STAT_EVENT(0, FFP_CONFLICT);)
+          // Happens when we use the prediction queue entry for a non-branch instruction 
+          // TODO: We could set back the corresponding tage_pred_used entry back to false
+          // but we dont use this field anywhere else so it doesnt really matter
         } else{
           element.tage_pred_used[fft_picker] = true;
         }
@@ -569,6 +571,7 @@ bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc, uint6
 
         //std::cout << "Checking if we can use tage prediction..." << std::endl;
         if((current_cycle - element.insert_cycle >= FUTURE_TAGE_LATENCY) || FFP_USE_LATE_PRED) {
+          //std::cout << "Use tage prediction as final prediction..." << std::endl;
           final_pred = tage_pred;
           break;
         }
