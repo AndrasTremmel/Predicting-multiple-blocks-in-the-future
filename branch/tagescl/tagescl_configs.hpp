@@ -33,9 +33,9 @@ struct CONFIG_64KB {
   struct TAGE {
     static constexpr int MIN_HISTORY_SIZE = 6;
     static constexpr int MAX_HISTORY_SIZE = 3000;
-    static constexpr int NUM_HISTORIES = 18;
+    static constexpr int NUM_HISTORIES = 21;
     static constexpr int PATH_HISTORY_WIDTH = 27;
-    static constexpr int FIRST_LONG_HISTORY_TABLE = 13;
+    static constexpr int FIRST_LONG_HISTORY_TABLE = 7;
     static constexpr int FIRST_2WAY_TABLE = 9;
     static constexpr int LAST_2WAY_TABLE = 22;
     static constexpr int SHORT_HISTORY_TAG_BITS = 8;
