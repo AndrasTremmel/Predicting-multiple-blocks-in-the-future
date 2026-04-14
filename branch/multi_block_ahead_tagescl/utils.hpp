@@ -23,6 +23,8 @@
 #define SPEC_TAGE_SC_L_UTILS_HPP_
 
 #include <cassert>
+#include <stdio.h>
+
 
 namespace tagescl {
 
@@ -197,6 +199,8 @@ class Circular_Buffer {
   uint32_t front_;
   uint32_t size_;
 };
+
+
 
 }  // namespace tagescl
 

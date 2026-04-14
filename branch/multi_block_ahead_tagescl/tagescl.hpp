@@ -27,6 +27,8 @@
 #include "tagescl_configs.hpp"
 #include "utils.hpp"
 
+#define PREDICTION_INFO_BUFFER_SIZE 2
+
 namespace tagescl {
 
 template <class CONFIG>
@@ -52,13 +54,13 @@ class Tage_SC_L_Base {
                             Branch_Type br_type, bool resolve_dir) = 0;
   virtual void commit_state_at_retire(uint32_t branch_id, uint64_t br_pc,
                                       Branch_Type br_type, bool resolve_dir,
-                                      uint64_t br_target) = 0;
+                                      uint64_t br_target, bool is_first_prediction) = 0;
   virtual void retire_non_branch_ip(uint32_t branch_id) = 0;
-  virtual void flush_branch(uint32_t branch_id) = 0;
-  virtual void flush_branch_and_repair_state(uint32_t branch_id, uint64_t br_pc,
-                                             Branch_Type br_type,
-                                             bool resolve_dir,
-                                             uint64_t br_target) = 0;
+  // virtual void flush_branch(uint32_t branch_id) = 0;
+  // virtual void flush_branch_and_repair_state(uint32_t branch_id, uint64_t br_pc,
+  //                                            Branch_Type br_type,
+  //                                            bool resolve_dir,
+  //                                            uint64_t br_target) = 0;
 };
 
 /* Interface functions:
@@ -78,20 +80,30 @@ class Tage_SC_L : public Tage_SC_L_Base {
         statistical_corrector_(),
         loop_predictor_(random_number_gen_),
         loop_predictor_beneficial_(-1),
-        prediction_info_buffer_(max_in_flight_branches) {}
+        prediction_info_buffer_(PREDICTION_INFO_BUFFER_SIZE) {}
 
   // Gets a new branch_id for a new in-flight branch. The id remains valid
   // until
   // the branch is retired or flushed. The class internally maintains metadata
   // for each in-flight branch. The rest of the public functions in this class
   // need the id of a branch to work on.
+  // uint32_t get_new_branch_id() override {
+  //   uint32_t branch_id = prediction_info_buffer_.allocate_back();
+  //   auto& prediction_info = prediction_info_buffer_[branch_id];
+  //   Tage<typename CONFIG::TAGE>::build_empty_prediction(&prediction_info.tage);
+  //   Loop_Predictor<typename CONFIG::LOOP>::build_empty_prediction(
+  //       &prediction_info.loop);
+  //   prediction_info.updated_history = false;
+  //   return branch_id;
+  // }
   uint32_t get_new_branch_id() override {
-    uint32_t branch_id = prediction_info_buffer_.allocate_back();
-    auto& prediction_info = prediction_info_buffer_[branch_id];
-    Tage<typename CONFIG::TAGE>::build_empty_prediction(&prediction_info.tage);
-    Loop_Predictor<typename CONFIG::LOOP>::build_empty_prediction(
-        &prediction_info.loop);
-    prediction_info.updated_history = false;
+    uint32_t branch_id = prediction_info_buffer_.get_read_id();
+    //std::cout << "New branch id is: " << branch_id << std::endl;
+    //auto& prediction_info = prediction_info_buffer_[branch_id];
+    //Tage<typename CONFIG::TAGE>::build_empty_prediction(&prediction_info.tage);
+    //Loop_Predictor<typename CONFIG::LOOP>::build_empty_prediction(
+    //    &prediction_info.loop);
+    //prediction_info.updated_history = false;
     return branch_id;
   }
 
@@ -122,25 +134,25 @@ class Tage_SC_L : public Tage_SC_L_Base {
   // is called. branch_id is invalidated and should not be used anymore.
   void commit_state_at_retire(uint32_t branch_id, uint64_t br_pc,
                               Branch_Type br_type, bool resolve_dir,
-                              uint64_t br_target) override;
+                              uint64_t br_target, bool is_first_prediction) override;
 
   // Removes a non-branch instruction from the system. Invalidates branch_id.
   // Should be called directly after get_new_branch_id().
   void retire_non_branch_ip(uint32_t branch_id) override;
 
-  // Flushes the branch and all branches that came after it
-  // and repairs the speculative state of the predictor.
-  // It invalidates the branch id of all branches after the flushed branch
-  // (including the flushed branch).
-  void flush_branch(uint32_t branch_id) override;
+  // // Flushes the branch and all branches that came after it
+  // // and repairs the speculative state of the predictor.
+  // // It invalidates the branch id of all branches after the flushed branch
+  // // (including the flushed branch).
+  // void flush_branch(uint32_t branch_id) override;
 
-  // Flushes the branch and all branches that came after it
-  // and repairs the speculative state of the predictor.
-  // It invalidates the branch ids of all branches
-  // strictly after the flushed branch.
-  void flush_branch_and_repair_state(uint32_t branch_id, uint64_t br_pc,
-                                     Branch_Type br_type, bool resolve_dir,
-                                     uint64_t br_target) override;
+  // // Flushes the branch and all branches that came after it
+  // // and repairs the speculative state of the predictor.
+  // // It invalidates the branch ids of all branches
+  // // strictly after the flushed branch.
+  // void flush_branch_and_repair_state(uint32_t branch_id, uint64_t br_pc,
+  //                                    Branch_Type br_type, bool resolve_dir,
+  //                                    uint64_t br_target) override;
 
  private:
   Random_Number_Generator random_number_gen_;
@@ -216,105 +228,146 @@ void Tage_SC_L<CONFIG>::commit_state(uint32_t branch_id, uint64_t br_pc,
                      prediction_info.final_prediction);
 }
 
-template <class CONFIG>
-void Tage_SC_L<CONFIG>::flush_branch_and_repair_state(uint32_t branch_id,
-                                                      uint64_t br_pc,
-                                                      Branch_Type br_type,
-                                                      bool resolve_dir,
-                                                      uint64_t br_target) {
-  // First iterate over all flushed branches from youngest to oldest and call
-  // local recovery functions.
-  for (uint32_t id = prediction_info_buffer_.back_id();
-       id - branch_id < (uint32_t{1} << 31); --id) {
-    auto& prediction_info = prediction_info_buffer_[id];
-    tage_.local_recover_speculative_state(prediction_info.tage);
-    if (CONFIG::USE_LOOP_PREDICTOR) {
-      loop_predictor_.local_recover_speculative_state(prediction_info.loop);
-    }
-    if (CONFIG::USE_SC) {
-      statistical_corrector_.local_recover_speculative_state(
-          prediction_info.br_pc, prediction_info.sc);
-    }
-  }
-  prediction_info_buffer_.deallocate_after(branch_id);
+// template <class CONFIG>
+// void Tage_SC_L<CONFIG>::flush_branch_and_repair_state(uint32_t branch_id,
+//                                                       uint64_t br_pc,
+//                                                       Branch_Type br_type,
+//                                                       bool resolve_dir,
+//                                                       uint64_t br_target) {
+//   // First iterate over all flushed branches from youngest to oldest and call
+//   // local recovery functions.
+//   for (uint32_t id = prediction_info_buffer_.back_id();
+//        id - branch_id < (uint32_t{1} << 31); --id) {
+//     auto& prediction_info = prediction_info_buffer_[id];
+//     tage_.local_recover_speculative_state(prediction_info.tage);
+//     if (CONFIG::USE_LOOP_PREDICTOR) {
+//       loop_predictor_.local_recover_speculative_state(prediction_info.loop);
+//     }
+//     if (CONFIG::USE_SC) {
+//       statistical_corrector_.local_recover_speculative_state(
+//           prediction_info.br_pc, prediction_info.sc);
+//     }
+//   }
+//   prediction_info_buffer_.deallocate_after(branch_id);
 
-  // Now call global recovery functions.
-  auto& prediction_info = prediction_info_buffer_[branch_id];
-  tage_.global_recover_speculative_state(prediction_info.tage);
-  if (CONFIG::USE_LOOP_PREDICTOR) {
-    loop_predictor_.global_recover_speculative_state(prediction_info.loop);
-  }
-  if (CONFIG::USE_SC) {
-    statistical_corrector_.global_recover_speculative_state(prediction_info.sc);
-  }
+//   // Now call global recovery functions.
+//   auto& prediction_info = prediction_info_buffer_[branch_id];
+//   tage_.global_recover_speculative_state(prediction_info.tage);
+//   if (CONFIG::USE_LOOP_PREDICTOR) {
+//     loop_predictor_.global_recover_speculative_state(prediction_info.loop);
+//   }
+//   if (CONFIG::USE_SC) {
+//     statistical_corrector_.global_recover_speculative_state(prediction_info.sc);
+//   }
 
-  random_number_gen_.seed_ = prediction_info.rng_seed;
+//   random_number_gen_.seed_ = prediction_info.rng_seed;
 
-  // Finally, update the speculative histories again using the resolved
-  // direction of the branch.
-  tage_.update_speculative_state(br_pc, br_target, br_type, resolve_dir,
-                                 &prediction_info.tage);
-  if (CONFIG::USE_LOOP_PREDICTOR) {
-    loop_predictor_.update_speculative_state(prediction_info.loop);
-  }
-  if (CONFIG::USE_SC) {
-    statistical_corrector_.update_speculative_state(
-        br_pc, resolve_dir, br_target, br_type, &prediction_info.sc);
-  }
-}
+//   // Finally, update the speculative histories again using the resolved
+//   // direction of the branch.
+//   tage_.update_speculative_state(br_pc, br_target, br_type, resolve_dir,
+//                                  &prediction_info.tage);
+//   if (CONFIG::USE_LOOP_PREDICTOR) {
+//     loop_predictor_.update_speculative_state(prediction_info.loop);
+//   }
+//   if (CONFIG::USE_SC) {
+//     statistical_corrector_.update_speculative_state(
+//         br_pc, resolve_dir, br_target, br_type, &prediction_info.sc);
+//   }
+// }
 
-template <class CONFIG>
-void Tage_SC_L<CONFIG>::flush_branch(uint32_t branch_id) {
-  // First iterate over all flushed branches from youngest to oldest and
-  // call local recovery functions.
-  for (uint32_t id = prediction_info_buffer_.back_id();
-       id - branch_id < (uint32_t{1} << 31); --id) {
-    auto& prediction_info = prediction_info_buffer_[id];
-    tage_.local_recover_speculative_state(prediction_info.tage);
-    if (CONFIG::USE_LOOP_PREDICTOR) {
-      loop_predictor_.local_recover_speculative_state(prediction_info.loop);
-    }
-    if (CONFIG::USE_SC) {
-      statistical_corrector_.local_recover_speculative_state(
-          prediction_info.br_pc, prediction_info.sc);
-    }
-  }
+// template <class CONFIG>
+// void Tage_SC_L<CONFIG>::flush_branch(uint32_t branch_id) {
+//   // First iterate over all flushed branches from youngest to oldest and
+//   // call local recovery functions.
+//   for (uint32_t id = prediction_info_buffer_.back_id();
+//        id - branch_id < (uint32_t{1} << 31); --id) {
+//     auto& prediction_info = prediction_info_buffer_[id];
+//     tage_.local_recover_speculative_state(prediction_info.tage);
+//     if (CONFIG::USE_LOOP_PREDICTOR) {
+//       loop_predictor_.local_recover_speculative_state(prediction_info.loop);
+//     }
+//     if (CONFIG::USE_SC) {
+//       statistical_corrector_.local_recover_speculative_state(
+//           prediction_info.br_pc, prediction_info.sc);
+//     }
+//   }
 
-  auto& prediction_info = prediction_info_buffer_[branch_id];
-  prediction_info_buffer_.deallocate_and_after(branch_id);
+//   auto& prediction_info = prediction_info_buffer_[branch_id];
+//   prediction_info_buffer_.deallocate_and_after(branch_id);
 
-  // Now call global recovery functions.
-  tage_.global_recover_speculative_state(prediction_info.tage);
-  if (CONFIG::USE_LOOP_PREDICTOR) {
-    loop_predictor_.global_recover_speculative_state(prediction_info.loop);
-  }
-  if (CONFIG::USE_SC) {
-    statistical_corrector_.global_recover_speculative_state(prediction_info.sc);
-  }
+//   // Now call global recovery functions.
+//   tage_.global_recover_speculative_state(prediction_info.tage);
+//   if (CONFIG::USE_LOOP_PREDICTOR) {
+//     loop_predictor_.global_recover_speculative_state(prediction_info.loop);
+//   }
+//   if (CONFIG::USE_SC) {
+//     statistical_corrector_.global_recover_speculative_state(prediction_info.sc);
+//   }
 
-  random_number_gen_.seed_ = prediction_info.rng_seed;
-}
+//   random_number_gen_.seed_ = prediction_info.rng_seed;
+// }
+
+// template <class CONFIG>
+// void Tage_SC_L<CONFIG>::commit_state_at_retire(uint32_t branch_id,
+//                                                uint64_t br_pc,
+//                                                Branch_Type br_type,
+//                                                bool resolve_dir,
+//                                                uint64_t br_target, bool has_served) {
+//   auto& prediction_info = prediction_info_buffer_[branch_id];
+//   if (prediction_info.updated_history) {
+//     if (CONFIG::USE_LOOP_PREDICTOR) {
+//       loop_predictor_.commit_state_at_retire(
+//         br_pc, resolve_dir, prediction_info.loop,
+//         prediction_info.final_prediction != resolve_dir,
+//         prediction_info.tage.prediction);
+//     }
+//     tage_.commit_state_at_retire(prediction_info.tage);
+//     if (CONFIG::USE_SC) {
+//       statistical_corrector_.commit_state_at_retire();
+//     }
+//   }
+//   if(has_served) {
+//     prediction_info_buffer_.deallocate_front(branch_id);
+//   }
+// }
+
+
 
 template <class CONFIG>
 void Tage_SC_L<CONFIG>::commit_state_at_retire(uint32_t branch_id,
                                                uint64_t br_pc,
                                                Branch_Type br_type,
                                                bool resolve_dir,
-                                               uint64_t br_target) {
+                                               uint64_t br_target, bool is_first_prediction) {
+  //std::cout << "Starting retire for branch id: " << branch_id << std::endl;                                                
   auto& prediction_info = prediction_info_buffer_[branch_id];
+  // This can only hold for branch instructions as it 
+  // requires speculative update to be already done 
+  // on the instruction which is called from inside the 
+  // O3_CPU::last_branch_result ChampSim API function
+  // which is only called after O3_CPU::predict_branch if
+  // the instruction is actually a branch instruction.
   if (prediction_info.updated_history) {
-    if (CONFIG::USE_LOOP_PREDICTOR) {
-      loop_predictor_.commit_state_at_retire(
-        br_pc, resolve_dir, prediction_info.loop,
-        prediction_info.final_prediction != resolve_dir,
-        prediction_info.tage.prediction);
-    }
+    //std::cout << "Updated history changed..." << std::endl;
+    // if (CONFIG::USE_LOOP_PREDICTOR) {
+    //   loop_predictor_.commit_state_at_retire(
+    //     br_pc, resolve_dir, prediction_info.loop,
+    //     prediction_info.final_prediction != resolve_dir,
+    //     prediction_info.tage.final_prediction);
+    // }
+    //std::cout << "Calling tage reire..." << std::endl;
     tage_.commit_state_at_retire(prediction_info.tage);
-    if (CONFIG::USE_SC) {
-      statistical_corrector_.commit_state_at_retire();
-    }
+    // if (CONFIG::USE_SC) {
+    //   statistical_corrector_.commit_state_at_retire();
+    // }
+    //std::cout << "Deallocating front element of predicton info buffer..." << std::endl;
+    if(!is_first_prediction) {
+      prediction_info_buffer_.deallocate_front(branch_id);
+    }    // Remove the corresponding delay queue entry which should
+    // be the front element if there is a prediction queue entry
+    // for this branch. Notice that for the first AHEAD_DISTANCE
+    // branches we do not have an entry in the prediction queue
   }
-  prediction_info_buffer_.deallocate_front(branch_id);
 }
 
 template <class CONFIG>
