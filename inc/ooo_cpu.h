@@ -108,10 +108,10 @@ public:
   // mbtb_transition last_transition = mbtb_transition::N;
 
 
-  uint64_t previous_pred_target = 0;
-  bool     previous_pred_always_taken = 0;
-  bool     previous_pred_taken  = false;
-  uint64_t previous_pred_branch_ip = 0;
+  // uint64_t previous_pred_target = 0;
+  // bool     previous_pred_always_taken = 0;
+  // bool     previous_pred_taken  = false;
+  // uint64_t previous_pred_branch_ip = 0;
 
   // ---------------------------------------------------
 
