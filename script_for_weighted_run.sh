@@ -4,8 +4,8 @@ CHAMPSIM_BIN="./bin/champsim"
 TRACE_DIR="./Traces"
 SIMPOINT_ROOT="./Weights"
 
-WARMUP=50000000
-SIM=200000000
+WARMUP=10000000
+SIM=100000000
 
 echo "========================================"
 echo "Starting ChampSim batch run"
