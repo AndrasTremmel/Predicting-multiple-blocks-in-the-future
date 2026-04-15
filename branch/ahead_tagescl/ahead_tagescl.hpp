@@ -758,6 +758,11 @@ void Tage_SC_L<CONFIG>::commit_state(uint32_t branch_id, uint64_t br_pc,
   //       prediction_info.final_prediction != resolve_dir,
   //       prediction_info.tage.final_prediction);
   // }
+
+  // TODO: test if updating TAGE only on conditional branches brings any performance improvements
+  if (!br_type.is_conditional) {
+    return;
+  }
   if(prediction_info.tage_prediction_valid) {
     //std::cout << "Tage prediction valid, starting commit for tage..." << std::endl;
     tage_.commit_state(br_pc, resolve_dir, prediction_info.tage,
@@ -881,7 +886,7 @@ void Tage_SC_L<CONFIG>::commit_state_at_retire(uint32_t branch_id,
     //     prediction_info.final_prediction != resolve_dir,
     //     prediction_info.tage.final_prediction);
     // }
-    //std::cout << "Calling tage reire..." << std::endl;
+    //std::cout << "Calling tage retire..." << std::endl;
     tage_.commit_state_at_retire(prediction_info.tage);
     // if (CONFIG::USE_SC) {
     //   statistical_corrector_.commit_state_at_retire();
