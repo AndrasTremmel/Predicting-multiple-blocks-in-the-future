@@ -235,6 +235,8 @@ bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc) {
 template <class CONFIG>
 void Tage_SC_L<CONFIG>::commit_state(uint32_t branch_id, uint64_t br_pc,
                                      Branch_Type br_type, bool resolve_dir) {
+
+  // TODO: check if we only need to update the predictor for conditional branches                                  
   if (!br_type.is_conditional) {
     return;
   }

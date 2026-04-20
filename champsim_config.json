@@ -27,8 +27,8 @@
             "dispatch_latency": 1,
             "schedule_latency": 0,
             "execute_latency": 0,
-            "branch_predictor": "multi_block_ahead_tagescl",
-            "btb": "multi_block_ahead_btb"
+            "branch_predictor": "ahead_tagescl",
+            "btb": "basic_btb"
         }
     ],
 

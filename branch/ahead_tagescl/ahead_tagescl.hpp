@@ -41,7 +41,7 @@ typedef unsigned int uns;
 #define FFP_USE_LATE_PRED 1
 #define FUTURE_TAGE_LATENCY 3
 #define FFP_BM_THRESH 2
-#define FFP_KILL_BM_ONE_WRONG 0
+#define FFP_KILL_BM_ONE_WRONG 1
 
 #define L0_BTB_SIZE 1024
 #define L0_BTB_ASSOC 4
@@ -98,7 +98,7 @@ class Tage_SC_L_Base {
   virtual void commit_state_at_retire(uint32_t branch_id, uint64_t br_pc,
                                       Branch_Type br_type, bool resolve_dir,
                                       uint64_t br_target) = 0;
-  virtual void retire_non_branch_ip(uint32_t branch_id) = 0;
+  // virtual void retire_non_branch_ip(uint32_t branch_id) = 0;
   // virtual void flush_branch(uint32_t branch_id) = 0;
   // virtual void flush_branch_and_repair_state(uint32_t branch_id, uint64_t br_pc,
   //                                            Branch_Type br_type,
@@ -178,7 +178,7 @@ class Tage_SC_L : public Tage_SC_L_Base {
 
   // Removes a non-branch instruction from the system. Invalidates branch_id.
   // Should be called directly after get_new_branch_id().
-  void retire_non_branch_ip(uint32_t branch_id) override;
+  // void retire_non_branch_ip(uint32_t branch_id) override;
 
   // Flushes the branch and all branches that came after it
   // and repairs the speculative state of the predictor.
@@ -675,7 +675,7 @@ void Tage_SC_L<CONFIG>::commit_state(uint32_t branch_id, uint64_t br_pc,
           access_res.entry->counter++;
         }
         bool bm_correct = resolve_dir == prediction_info.btb_prediction;
-        bool ffp_correct = resolve_dir == prediction_info.final_prediction;
+        bool ffp_correct = resolve_dir == prediction_info.tage.final_prediction;
         if(FFP_USE_BM){
           if(bm_correct && (!ffp_correct)){
             if(access_res.entry->use_bm_ctr < 7){
@@ -704,7 +704,7 @@ void Tage_SC_L<CONFIG>::commit_state(uint32_t branch_id, uint64_t br_pc,
     } else {
       auto access_res = btb_.probe(br_pc);
       bool bm_correct = resolve_dir == prediction_info.btb_prediction;
-      bool ffp_correct = resolve_dir == prediction_info.final_prediction;
+      bool ffp_correct = resolve_dir == prediction_info.tage.final_prediction;
       if(access_res.hit) {
         if(access_res.entry->counter > 0){
           access_res.entry->counter--;
@@ -733,7 +733,7 @@ void Tage_SC_L<CONFIG>::commit_state(uint32_t branch_id, uint64_t br_pc,
           }
         }
       }
-      else if((prediction_info.btb_prediction == resolve_dir) && (prediction_info.final_prediction != resolve_dir)) {
+      else if((prediction_info.btb_prediction == resolve_dir) && (prediction_info.tage.final_prediction != resolve_dir)) {
         btb_.insert(br_pc, target, 1);
       }
     }
@@ -759,10 +759,10 @@ void Tage_SC_L<CONFIG>::commit_state(uint32_t branch_id, uint64_t br_pc,
   //       prediction_info.tage.final_prediction);
   // }
 
-  // TODO: test if updating TAGE only on conditional branches brings any performance improvements
-  if (!br_type.is_conditional) {
-    return;
-  }
+  // // TODO: test if updating TAGE only on conditional branches brings any performance improvements
+  // if (!br_type.is_conditional) {
+  //   return;
+  // }
   if(prediction_info.tage_prediction_valid) {
     //std::cout << "Tage prediction valid, starting commit for tage..." << std::endl;
     tage_.commit_state(br_pc, resolve_dir, prediction_info.tage,
@@ -915,12 +915,12 @@ void Tage_SC_L<CONFIG>::commit_state_at_retire(uint32_t branch_id,
 // instructions just call commit_state_at_retire() function
 // to retire the instruction without speculative and 
 // prediction table update
-template <class CONFIG>
-void Tage_SC_L<CONFIG>::retire_non_branch_ip(uint32_t branch_id) {
-  // std::cerr << "retire_non_branch_ip(" << branch_id << ")\n";
-  //prediction_info_buffer_.deallocate_front(branch_id);
-  future_tage_response_delay_queue.pop_back();
-}
+// template <class CONFIG>
+// void Tage_SC_L<CONFIG>::retire_non_branch_ip(uint32_t branch_id) {
+//   // std::cerr << "retire_non_branch_ip(" << branch_id << ")\n";
+//   //prediction_info_buffer_.deallocate_front(branch_id);
+//   future_tage_response_delay_queue.pop_back();
+// }
 
 template <class CONFIG>
 void Tage_SC_L<CONFIG>::update_speculative_state(uint32_t branch_id,
