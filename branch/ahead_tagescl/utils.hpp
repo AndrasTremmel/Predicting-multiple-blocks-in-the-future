@@ -149,61 +149,6 @@ struct Branch_Type {
   bool is_indirect;
 };
 
-// template <typename T>
-// class Circular_Buffer {
-//  public:
-//   Circular_Buffer(unsigned max_size)
-//       : buffer_(1 << get_min_num_bits_to_represent(max_size)),
-//         buffer_access_mask_(buffer_.size() - 1),
-//         back_(-1),
-//         front_(-1),
-//         size_(0) {}
-
-//   T& operator[](uint32_t id) {
-//     assert(back_ - id < back_ - front_);
-//     return buffer_[id & buffer_access_mask_];
-//   }
-
-//   uint32_t back_id() const { return back_; }
-
-//   void deallocate_after(uint32_t id) {
-//     assert(back_ - id < back_ - front_);
-//     size_ -= (back_ - id);
-//     back_ = id;
-//   }
-
-//   void deallocate_and_after(uint32_t id) {
-//     assert((back_ - id + 1) < (back_ - front_ + 1));
-//     size_ -= (back_ - id + 1);
-//     back_ = id - 1;
-//   }
-
-//   uint32_t allocate_back() {
-//     assert(size_ < buffer_.size());
-//     back_ += 1;
-//     size_ += 1;
-//     return back_;
-//   }
-
-//   void deallocate_front(uint32_t pop_id) {
-//     front_ += 1;
-//     assert(pop_id == front_);
-//     assert(size_ > 0);
-//     size_ -= 1;
-//   }
-
-//  private:
-//   std::vector<T> buffer_;
-//   uint32_t buffer_access_mask_;
-
-//   uint32_t back_;
-//   uint32_t front_;
-//   uint32_t size_;
-// };
-
-
-
-
 
 template <typename T>
 class CircularBuffer {
@@ -212,7 +157,6 @@ public:
                       size_t ahead_distance)
         : capacity_(inflight_branches + ahead_distance),
           buffer_(capacity_),
-        //valid_(capacity_, false),
           read_id_(0),
           alloc_id_(ahead_distance)
     {
@@ -235,11 +179,6 @@ public:
     T& operator[](uint32_t id) {
       assert(contains(id));
       size_t idx = physical_index(id);
-      // if(id == alloc_id_) {
-      //   valid_[idx] = true;
-      // } else {
-      //   assert(valid_[idx]);
-      // }
       return buffer_[idx];    
     }
 
@@ -250,9 +189,6 @@ public:
 
       // Reset the stored object using its default constructor
       buffer_[idx] = T{};
-
-      // Mark the entry as invalid
-      //valid_[idx] = false;
     }
 
     void deallocate_front(uint32_t pop_id) {
@@ -262,31 +198,6 @@ public:
       alloc_id_++;
     }
 
-    // void validate(uint32_t id) {
-    //   assert(contains(id));
-    //   size_t idx = physical_index(id);
-    //   valid_[idx] = true;
-    // }
-
-
-
-    // ===============================
-    // Flush (used on mispredict)
-    // ===============================
-
-    // Remove all entries with id >= from_id
-    // void flush_from(uint32_t from_id)
-    // {
-    //     assert(from_id >= read_id_);
-    //     assert(from_id <= alloc_id_);
-
-    //     for (uint32_t id = from_id; id < alloc_id_; ++id) {
-    //         size_t idx = physical_index(id);
-    //         valid_[idx] = false;
-    //     }
-
-    //     alloc_id_ = from_id;
-    // }
 
 private:
     size_t physical_index(uint32_t id) const
@@ -298,7 +209,6 @@ private:
     size_t capacity_;
 
     std::vector<T> buffer_;
-    //std::vector<bool> valid_;
 
     uint32_t read_id_;        // Oldest valid branch
     uint32_t alloc_id_;  // Next branch ID to allocate
