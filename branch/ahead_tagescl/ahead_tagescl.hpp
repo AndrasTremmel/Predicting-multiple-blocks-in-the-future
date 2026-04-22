@@ -22,7 +22,6 @@
 #ifndef SPEC_TAGE_SC_L_TAGESCL_HPP_
 #define SPEC_TAGE_SC_L_TAGESCL_HPP_
 
-//#include "statistical_corrector.hpp"
 #include "2tag_tage.hpp"
 #include "ahead_tagescl_configs.hpp"
 #include "utils.hpp"
@@ -34,22 +33,19 @@ typedef unsigned int uns;
 
 #define AHEAD_DISTANCE 5
 #define USE_2_BIT_COUNTER_IN_L0 1
-#define FFP_HASH_DIR 1      // used onlyfwhen SND_TAG_NO_PRED = 2
+#define FFP_HASH_DIR 1      // used only when SND_TAG_NO_PRED = 2
 #define FFP_HASH_DIR_ONLY 0 // use PC as well for missing history hash computation
 #define FFP_HASH_PC_BITS 1 // since we currently have SND_TAG_NO_PRED set to 32 (2^5), FFP_HASH_PC_BITS can only be 0,1 or 2
 #define FFP_USE_BM 1
 #define FFP_USE_LATE_PRED 1
 #define FUTURE_TAGE_LATENCY 3
 #define FFP_BM_THRESH 2
-#define FFP_KILL_BM_ONE_WRONG 0
+#define FFP_KILL_BM_ONE_WRONG 1
 
 #define L0_BTB_SIZE 1024
 #define L0_BTB_ASSOC 4
 
 struct delay_queue_entry{
-  //std::vector<bool> future_tage_preds;
-  //std::vector<bool> tage_pred_confs;
-  //std::vector<bool> tage_pred_used;
   bool future_tage_preds[SND_TAG_NO_PRED];
   bool tage_pred_confs[SND_TAG_NO_PRED];
   bool tage_pred_used[SND_TAG_NO_PRED];
@@ -62,7 +58,7 @@ struct delay_queue_entry{
   uint32_t branch_id;
   uint64_t insert_cycle;
   uint64_t br_pc;
-  uint64_t br_npc; //(luke) next pc
+  uint64_t br_npc; 
   bool current_pred;
   bool is_ret; 
 };
@@ -74,11 +70,8 @@ namespace tagescl {
 template <class CONFIG>
 struct Tage_SC_L_Prediction_Info {
   Tage_Prediction_Info_2tag<typename CONFIG::TAGE> tage;
-  //Loop_Prediction_Info<typename CONFIG::LOOP> loop;
-  //SC_Prediction_Info sc;
   uint64_t br_pc;
   int rng_seed;
-  //bool tage_or_loop_prediction;
   bool final_prediction;
   bool updated_history = false;
   // Store btb predictoion for later use in commit stage
@@ -98,12 +91,6 @@ class Tage_SC_L_Base {
   virtual void commit_state_at_retire(uint32_t branch_id, uint64_t br_pc,
                                       Branch_Type br_type, bool resolve_dir,
                                       uint64_t br_target) = 0;
-  virtual void retire_non_branch_ip(uint32_t branch_id) = 0;
-  // virtual void flush_branch(uint32_t branch_id) = 0;
-  // virtual void flush_branch_and_repair_state(uint32_t branch_id, uint64_t br_pc,
-  //                                            Branch_Type br_type,
-  //                                            bool resolve_dir,
-  //                                            uint64_t br_target) = 0;
   virtual uns get_recent_hist_hash(uint64_t br_pc) = 0;
 };
 
@@ -121,12 +108,7 @@ class Tage_SC_L : public Tage_SC_L_Base {
  public:
   Tage_SC_L(int max_in_flight_branches)
       : tage_(random_number_gen_, max_in_flight_branches),
-        //statistical_corrector_(),
-        //loop_predictor_(random_number_gen_),
-        // TODO: abstract the btb characteristics into the config file
         btb_(L0_BTB_SIZE, L0_BTB_ASSOC),
-
-        //loop_predictor_beneficial_(-1),
         prediction_info_buffer_(max_in_flight_branches, AHEAD_DISTANCE) {}
 
   // Gets a new branch_id for a new in-flight branch. The id remains valid
@@ -135,15 +117,8 @@ class Tage_SC_L : public Tage_SC_L_Base {
   // for each in-flight branch. The rest of the public functions in this class
   // need the id of a branch to work on.
 
-  // TODO: change the new branch id giving function
   uint32_t get_new_branch_id() override {
     uint32_t branch_id = prediction_info_buffer_.get_read_id();
-    //std::cout << "New branch id is: " << branch_id << std::endl;
-    //auto& prediction_info = prediction_info_buffer_[branch_id];
-    //Tage<typename CONFIG::TAGE>::build_empty_prediction(&prediction_info.tage);
-    //Loop_Predictor<typename CONFIG::LOOP>::build_empty_prediction(
-    //    &prediction_info.loop);
-    //prediction_info.updated_history = false;
     return branch_id;
   }
 
@@ -176,24 +151,6 @@ class Tage_SC_L : public Tage_SC_L_Base {
                               Branch_Type br_type, bool resolve_dir,
                               uint64_t br_target) override;
 
-  // Removes a non-branch instruction from the system. Invalidates branch_id.
-  // Should be called directly after get_new_branch_id().
-  void retire_non_branch_ip(uint32_t branch_id) override;
-
-  // Flushes the branch and all branches that came after it
-  // and repairs the speculative state of the predictor.
-  // It invalidates the branch id of all branches after the flushed branch
-  // (including the flushed branch).
-  //void flush_branch(uint32_t branch_id) override;
-
-  // Flushes the branch and all branches that came after it
-  // and repairs the speculative state of the predictor.
-  // It invalidates the branch ids of all branches
-  // strictly after the flushed branch.
-  // void flush_branch_and_repair_state(uint32_t branch_id, uint64_t br_pc,
-  //                                    Branch_Type br_type, bool resolve_dir,
-  //                                    uint64_t br_target) override;
-
   // Computes missing history hash for the current branch pc
   uns get_recent_hist_hash(uint64_t br_pc) override;
 
@@ -201,18 +158,10 @@ class Tage_SC_L : public Tage_SC_L_Base {
  private:
   Random_Number_Generator random_number_gen_;
   Tage_2tag<typename CONFIG::TAGE> tage_;
-  //Statistical_Corrector<CONFIG> statistical_corrector_;
-  //Loop_Predictor<typename CONFIG::LOOP> loop_predictor_;
   L0BTB btb_;
   std::deque<delay_queue_entry> future_tage_response_delay_queue;
 
-  // Counter for choosing between Tage and Loop Predictor.
-  // Saturating_Counter<CONFIG::CONFIDENCE_COUNTER_WIDTH, true>
-  //     loop_predictor_beneficial_;
-
-  // Used for remembering necessary information gathered during prediction
-  // that
-  // are needed for update.
+  // Used for remembering necessary information gathered during prediction that are needed for update.
   CircularBuffer<Tage_SC_L_Prediction_Info<CONFIG>> prediction_info_buffer_;
 };
 
@@ -585,34 +534,6 @@ bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc, uint6
   prediction_info.final_prediction = final_pred;
   
 
-
-  // // ***************************************************************
-  // // * Use the loop predictor and the statistical corrector to 
-  // // * adjust the tage prediction if needed
-  // // ***************************************************************
-
-  // old_prediction_info.tage_or_loop_prediction = final_pred;
-
-  // if (CONFIG::USE_LOOP_PREDICTOR) {
-  //   // Then, look up the loop predictor and override Tage's prediction if
-  //   // the loop predictor is found to be beneficial.
-  //   loop_predictor_.get_prediction(br_pc, &old_prediction_info.loop);
-  //   if (loop_predictor_beneficial_.get() >= 0 && old_prediction_info.loop.valid) {
-  //     old_prediction_info.tage_or_loop_prediction = old_prediction_info.loop.prediction;
-  //   }
-  // }
-
-  // if (!CONFIG::USE_SC) {
-  //   old_prediction_info.final_prediction = predictold_prediction_infoion_info.tage_or_loop_prediction;
-  // } else {
-  //   statistical_corrector_.get_prediction(
-  //       br_pc, old_prediction_info.tage, old_prediction_info.tage_or_loop_prediction,
-  //       &old_prediction_info.sc);
-  //   old_prediction_info.final_prediction = old_prediction_info.sc.prediction;
-  // }
-
-
-
   // ***********************************************************
   // * Create new prediction queue entry and add it to the queue
   // ***********************************************************
@@ -640,19 +561,15 @@ bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc, uint6
   }            
               
   temp_entry.br_pc = br_pc;
-  //temp_entry.br_npc = br_npc;
   temp_entry.insert_cycle = current_cycle;
   temp_entry.branch_id = branch_id + AHEAD_DISTANCE;
-  //temp_entry.current_pred = prediction_info.final_prediction;
   // TODO: check if we actually need/use this field
   //temp_entry.is_ret= op->table_info->cf_type == CF_RET;
   future_tage_response_delay_queue.push_back(temp_entry);
   //std::cout << "Added predicton queue entry to queue" << std::endl;
 
 
-
   return prediction_info.final_prediction;
-
 }
 
 template <class CONFIG>
@@ -675,7 +592,7 @@ void Tage_SC_L<CONFIG>::commit_state(uint32_t branch_id, uint64_t br_pc,
           access_res.entry->counter++;
         }
         bool bm_correct = resolve_dir == prediction_info.btb_prediction;
-        bool ffp_correct = resolve_dir == prediction_info.final_prediction;
+        bool ffp_correct = resolve_dir == prediction_info.tage.final_prediction;
         if(FFP_USE_BM){
           if(bm_correct && (!ffp_correct)){
             if(access_res.entry->use_bm_ctr < 7){
@@ -704,7 +621,7 @@ void Tage_SC_L<CONFIG>::commit_state(uint32_t branch_id, uint64_t br_pc,
     } else {
       auto access_res = btb_.probe(br_pc);
       bool bm_correct = resolve_dir == prediction_info.btb_prediction;
-      bool ffp_correct = resolve_dir == prediction_info.final_prediction;
+      bool ffp_correct = resolve_dir == prediction_info.tage.final_prediction;
       if(access_res.hit) {
         if(access_res.entry->counter > 0){
           access_res.entry->counter--;
@@ -733,31 +650,17 @@ void Tage_SC_L<CONFIG>::commit_state(uint32_t branch_id, uint64_t br_pc,
           }
         }
       }
-      else if((prediction_info.btb_prediction == resolve_dir) && (prediction_info.final_prediction != resolve_dir)) {
+      else if((prediction_info.btb_prediction == resolve_dir) && (prediction_info.tage.final_prediction != resolve_dir)) {
         btb_.insert(br_pc, target, 1);
       }
     }
   }
   
 
-  // if (CONFIG::USE_SC) {
-  //   statistical_corrector_.commit_state(
-  //       br_pc, resolve_dir, prediction_info.tage, prediction_info.sc,
-  //       prediction_info.tage_or_loop_prediction);
-  // }
-
-  // if (CONFIG::USE_LOOP_PREDICTOR) {
-  //   if (prediction_info.loop.valid) {
-  //     if (prediction_info.final_prediction != prediction_info.loop.prediction) {
-  //       loop_predictor_beneficial_.update(resolve_dir ==
-  //                                         prediction_info.loop.prediction);
-  //     }
-  //   }
-  //   loop_predictor_.commit_state(
-  //       br_pc, resolve_dir, prediction_info.loop,
-  //       prediction_info.final_prediction != resolve_dir,
-  //       prediction_info.tage.final_prediction);
-  // }
+  // Only update TAGE on conditional branches
+  if (!br_type.is_conditional) {
+    return;
+  }
   if(prediction_info.tage_prediction_valid) {
     //std::cout << "Tage prediction valid, starting commit for tage..." << std::endl;
     tage_.commit_state(br_pc, resolve_dir, prediction_info.tage,
@@ -766,98 +669,6 @@ void Tage_SC_L<CONFIG>::commit_state(uint32_t branch_id, uint64_t br_pc,
   }
 }
 
-
-
-// ***********************************************************
-// * We do not use the recover functions in ChampSim since we 
-// * only have 1 in-flight branch at any time, so there is no
-// * need for a rollback and flush
-// ***********************************************************
-// template <class CONFIG>
-// void Tage_SC_L<CONFIG>::flush_branch_and_repair_state(uint32_t branch_id,
-//                                                       uint64_t br_pc,
-//                                                       Branch_Type br_type,
-//                                                       bool resolve_dir,
-//                                                       uint64_t br_target) {
-//   // First iterate over all flushed branches from youngest to oldest and call
-//   // local recovery functions.
-//   for (uint32_t id = prediction_info_buffer_.back_id();
-//        id - branch_id < (uint32_t{1} << 31); --id) {
-//     auto& prediction_info = prediction_info_buffer_[id];
-//     tage_.local_recover_speculative_state(prediction_info.tage);
-//     // if (CONFIG::USE_LOOP_PREDICTOR) {
-//     //   loop_predictor_.local_recover_speculative_state(prediction_info.loop);
-//     // }
-//     // if (CONFIG::USE_SC) {
-//     //   statistical_corrector_.local_recover_speculative_state(
-//     //       prediction_info.br_pc, prediction_info.sc);
-//     // }
-//   }
-//   prediction_info_buffer_.deallocate_after(branch_id);
-
-//   // Now call global recovery functions.
-//   auto& prediction_info = prediction_info_buffer_[branch_id];
-//   tage_.global_recover_speculative_state(prediction_info.tage);
-//   // if (CONFIG::USE_LOOP_PREDICTOR) {
-//   //   loop_predictor_.global_recover_speculative_state(prediction_info.loop);
-//   // }
-//   // if (CONFIG::USE_SC) {
-//   //   statistical_corrector_.global_recover_speculative_state(prediction_info.sc);
-//   // }
-
-//   random_number_gen_.seed_ = prediction_info.rng_seed;
-
-//   // Finally, update the speculative histories again using the resolved
-//   // direction of the branch.
-//   tage_.update_speculative_state(br_pc, br_target, br_type, resolve_dir,
-//                                  &prediction_info.tage);
-//   // if (CONFIG::USE_LOOP_PREDICTOR) {
-//   //   loop_predictor_.update_speculative_state(prediction_info.loop);
-//   // }
-//   // if (CONFIG::USE_SC) {
-//   //   statistical_corrector_.update_speculative_state(
-//   //       br_pc, resolve_dir, br_target, br_type, &prediction_info.sc);
-//   // }
-// }
-
-
-
-// ***********************************************************
-// * We do not use the recover functions in ChampSim since we 
-// * only have 1 in-flight branch at any time, so there is no
-// * need for a rollback and flush
-// ***********************************************************
-// template <class CONFIG>
-// void Tage_SC_L<CONFIG>::flush_branch(uint32_t branch_id) {
-//   // First iterate over all flushed branches from youngest to oldest and
-//   // call local recovery functions.
-//   for (uint32_t id = prediction_info_buffer_.back_id();
-//        id - branch_id < (uint32_t{1} << 31); --id) {
-//     auto& prediction_info = prediction_info_buffer_[id];
-//     tage_.local_recover_speculative_state(prediction_info.tage);
-//     // if (CONFIG::USE_LOOP_PREDICTOR) {
-//     //   loop_predictor_.local_recover_speculative_state(prediction_info.loop);
-//     // }
-//     // if (CONFIG::USE_SC) {
-//     //   statistical_corrector_.local_recover_speculative_state(
-//     //       prediction_info.br_pc, prediction_info.sc);
-//     // }
-//   }
-
-//   auto& prediction_info = prediction_info_buffer_[branch_id];
-//   prediction_info_buffer_.deallocate_and_after(branch_id);
-
-//   // Now call global recovery functions.
-//   tage_.global_recover_speculative_state(prediction_info.tage);
-//   // if (CONFIG::USE_LOOP_PREDICTOR) {
-//   //   loop_predictor_.global_recover_speculative_state(prediction_info.loop);
-//   // }
-//   // if (CONFIG::USE_SC) {
-//   //   statistical_corrector_.global_recover_speculative_state(prediction_info.sc);
-//   // }
-
-//   random_number_gen_.seed_ = prediction_info.rng_seed;
-// }
 
 template <class CONFIG>
 void Tage_SC_L<CONFIG>::commit_state_at_retire(uint32_t branch_id,
@@ -875,17 +686,10 @@ void Tage_SC_L<CONFIG>::commit_state_at_retire(uint32_t branch_id,
   // the instruction is actually a branch instruction.
   if (prediction_info.updated_history) {
     //std::cout << "Updated history changed..." << std::endl;
-    // if (CONFIG::USE_LOOP_PREDICTOR) {
-    //   loop_predictor_.commit_state_at_retire(
-    //     br_pc, resolve_dir, prediction_info.loop,
-    //     prediction_info.final_prediction != resolve_dir,
-    //     prediction_info.tage.final_prediction);
-    // }
-    //std::cout << "Calling tage reire..." << std::endl;
+  
+    //std::cout << "Calling tage retire..." << std::endl;
     tage_.commit_state_at_retire(prediction_info.tage);
-    // if (CONFIG::USE_SC) {
-    //   statistical_corrector_.commit_state_at_retire();
-    // }
+    
     //std::cout << "Deallocating front element of predicton info buffer..." << std::endl;
     prediction_info_buffer_.deallocate_front(branch_id);
     // Remove the corresponding delay queue entry which should
@@ -906,16 +710,6 @@ void Tage_SC_L<CONFIG>::commit_state_at_retire(uint32_t branch_id,
   }
 }
 
-// We do not use this function for retiring non-branch 
-// instructions just call commit_state_at_retire() function
-// to retire the instruction without speculative and 
-// prediction table update
-template <class CONFIG>
-void Tage_SC_L<CONFIG>::retire_non_branch_ip(uint32_t branch_id) {
-  // std::cerr << "retire_non_branch_ip(" << branch_id << ")\n";
-  //prediction_info_buffer_.deallocate_front(branch_id);
-  future_tage_response_delay_queue.pop_back();
-}
 
 template <class CONFIG>
 void Tage_SC_L<CONFIG>::update_speculative_state(uint32_t branch_id,
@@ -930,13 +724,7 @@ void Tage_SC_L<CONFIG>::update_speculative_state(uint32_t branch_id,
   //std::cout << "Starting tage speculative update..." << std::endl;
   tage_.update_speculative_state(br_pc, br_target, br_type, branch_dir,
                                  &prediction_info.tage);
-  // if (CONFIG::USE_LOOP_PREDICTOR) {
-  //   loop_predictor_.update_speculative_state(prediction_info.loop);
-  // }
-  // if (CONFIG::USE_SC) {
-  //   statistical_corrector_.update_speculative_state(
-  //       br_pc, branch_dir, br_target, br_type, &prediction_info.sc);
-  // }
+  
   //std::cout << "Tage speculative update finished starting prediction queue entry back update for branch id: " << branch_id + AHEAD_DISTANCE << std::endl;
   assert(future_tage_response_delay_queue.back().branch_id == branch_id + AHEAD_DISTANCE);
   future_tage_response_delay_queue.back().current_pred = branch_dir;

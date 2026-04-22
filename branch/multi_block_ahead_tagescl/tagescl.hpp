@@ -26,6 +26,8 @@
 #include "tagescl_configs.hpp"
 #include "utils.hpp"
 
+#define MULTI_BLOCK_AHEAD_DISTANCE 1
+
 namespace tagescl {
 
 template <class CONFIG>
@@ -34,7 +36,10 @@ struct Tage_SC_L_Prediction_Info {
   uint64_t br_pc;
   int rng_seed;
   bool final_prediction;
-  bool updated_history;
+  bool updated_history = false;
+
+  // store if tage prediction is valid
+  bool tage_prediction_valid = false;
 };
 
 class Tage_SC_L_Base {
@@ -65,18 +70,10 @@ class Tage_SC_L : public Tage_SC_L_Base {
  public:
   Tage_SC_L(int max_in_flight_branches)
       : tage_(random_number_gen_, max_in_flight_branches),
-        prediction_info_buffer_(max_in_flight_branches) {}
+        prediction_info_buffer_(max_in_flight_branches, MULTI_BLOCK_AHEAD_DISTANCE) {}
 
-  // Gets a new branch_id for a new in-flight branch. The id remains valid
-  // until
-  // the branch is retired or flushed. The class internally maintains metadata
-  // for each in-flight branch. The rest of the public functions in this class
-  // need the id of a branch to work on.
   uint32_t get_new_branch_id() override {
-    uint32_t branch_id = prediction_info_buffer_.allocate_back();
-    auto& prediction_info = prediction_info_buffer_[branch_id];
-    Tage<typename CONFIG::TAGE>::build_empty_prediction(&prediction_info.tage);
-    prediction_info.updated_history = false;
+    uint32_t branch_id = prediction_info_buffer_.get_read_id();
     return branch_id;
   }
 
@@ -109,39 +106,58 @@ class Tage_SC_L : public Tage_SC_L_Base {
                               Branch_Type br_type, bool resolve_dir,
                               uint64_t br_target) override;
 
-
-
  private:
   Random_Number_Generator random_number_gen_;
   Tage<typename CONFIG::TAGE> tage_;
 
-  // Used for remembering necessary information gathered during prediction
-  // that
-  // are needed for update.
-  Circular_Buffer<Tage_SC_L_Prediction_Info<CONFIG>> prediction_info_buffer_;
+  // Used for remembering necessary information gathered during prediction that are needed for update.
+  CircularBuffer<Tage_SC_L_Prediction_Info<CONFIG>> prediction_info_buffer_;
 };
+
 
 template <class CONFIG>
 bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc) {
+  // ************************************************************
+  // * Create new prediction and add it to the prediction buffer
+  // ************************************************************
+  auto& future_prediction_info = prediction_info_buffer_[branch_id + MULTI_BLOCK_AHEAD_DISTANCE];
+  tage_.get_prediction(br_pc, &future_prediction_info.tage);
+  future_prediction_info.tage_prediction_valid = true;
+  future_prediction_info.final_prediction = future_prediction_info.tage.prediction;
+
+
+
+  // ***********************************************************
+  // * Get the prediction info for the current branch
+  // ***********************************************************
+  //std::cout << "Starting prediction for branch id:: " << branch_id << " and branch pc: " << br_pc << std::endl;
   auto& prediction_info = prediction_info_buffer_[branch_id];
 
-  // First, use Tage to make a prediction.
-  tage_.get_prediction(br_pc, &prediction_info.tage);
+  // Update branch pc since it was unkown up until now
+  prediction_info.br_pc = br_pc;
 
-  prediction_info.final_prediction = prediction_info.tage.prediction;
-  return prediction_info.final_prediction;
+
+  if(prediction_info.tage_prediction_valid) {
+      return prediction_info.final_prediction;
+  }
+
+  return false;
 }
+
 
 template <class CONFIG>
 void Tage_SC_L<CONFIG>::commit_state(uint32_t branch_id, uint64_t br_pc,
                                      Branch_Type br_type, bool resolve_dir) {
+
+  // Only update TAGE for conditional branches                                  
   if (!br_type.is_conditional) {
     return;
   }
   auto& prediction_info = prediction_info_buffer_[branch_id];
-
-  tage_.commit_state(br_pc, resolve_dir, prediction_info.tage,
-                     prediction_info.final_prediction);
+  
+  if(prediction_info.tage_prediction_valid) {
+    tage_.commit_state(br_pc, resolve_dir, prediction_info.tage, prediction_info.final_prediction);
+  }
 }
 
 
@@ -151,11 +167,23 @@ void Tage_SC_L<CONFIG>::commit_state_at_retire(uint32_t branch_id,
                                                Branch_Type br_type,
                                                bool resolve_dir,
                                                uint64_t br_target) {
+  //std::cout << "Starting retire for branch id: " << branch_id << std::endl;                                                
   auto& prediction_info = prediction_info_buffer_[branch_id];
+  // This can only hold for branch instructions as it 
+  // requires speculative update to be already done 
+  // on the instruction which is called from inside the 
+  // O3_CPU::last_branch_result ChampSim API function
+  // which is only called after O3_CPU::predict_branch if
+  // the instruction is actually a branch instruction.
   if (prediction_info.updated_history) {
+    //std::cout << "Updated history changed..." << std::endl;
+    
+    //std::cout << "Calling tage reire..." << std::endl;
     tage_.commit_state_at_retire(prediction_info.tage);
+    
+    //std::cout << "Deallocating front element of predicton info buffer..." << std::endl;
+    prediction_info_buffer_.deallocate_front(branch_id);
   }
-  prediction_info_buffer_.deallocate_front(branch_id);
 }
 
 
@@ -170,8 +198,6 @@ void Tage_SC_L<CONFIG>::update_speculative_state(uint32_t branch_id,
   prediction_info.updated_history = true;
   tage_.update_speculative_state(br_pc, br_target, br_type, branch_dir,
                                  &prediction_info.tage);
-  
-  prediction_info.br_pc = br_pc;
 }
 
 }  // namespace tagescl

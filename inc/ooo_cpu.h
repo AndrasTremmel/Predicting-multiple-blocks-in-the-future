@@ -94,6 +94,27 @@ struct LSQ_ENTRY {
 class O3_CPU : public champsim::operable
 {
 public:
+  // ------------------------------------------------------------
+  // Stored prediction and target for multi-block prediction 
+  // ----------------------------------------------------------
+  // uint64_t previous_block_pred_target = 0;
+  // bool     previous_block_pred_taken  = false;
+  // bool     previous_block_valid       = false;
+  // uint64_t previous_block_branch_ip = 0;
+  // mbtb_transition previous_block_last_transition = mbtb_transition::N;
+
+
+  // uint64_t last_branch_ip = 0;
+  // mbtb_transition last_transition = mbtb_transition::N;
+
+
+  // uint64_t previous_pred_target = 0;
+  // bool     previous_pred_always_taken = 0;
+  // bool     previous_pred_taken  = false;
+  // uint64_t previous_pred_branch_ip = 0;
+
+  // ---------------------------------------------------
+
   uint32_t cpu = 0;
 
   // cycle
