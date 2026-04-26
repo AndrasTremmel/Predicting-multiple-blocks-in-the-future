@@ -156,7 +156,6 @@ public:
                       size_t multi_block_ahead_distance)
         : capacity_(inflight_branches + multi_block_ahead_distance),
           buffer_(capacity_),
-        //valid_(capacity_, false),
           read_id_(0),
           alloc_id_(multi_block_ahead_distance)
     {
