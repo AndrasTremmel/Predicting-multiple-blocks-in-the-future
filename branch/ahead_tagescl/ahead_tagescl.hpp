@@ -615,6 +615,7 @@ bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc, uint6
   auto& future_prediction_info = prediction_info_buffer_[branch_id + AHEAD_DISTANCE];
   future_prediction_info.tage.final_prediction = false;
   future_prediction_info.tage_prediction_valid = true;
+  future_prediction_info.tage.br_pc_used_for_pred_gen = br_pc;
 
 
   delay_queue_entry temp_entry;

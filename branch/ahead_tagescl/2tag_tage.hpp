@@ -238,6 +238,7 @@ struct Tage_Prediction_Info_2tag {
   int64_t path_history_commit_checkpoint;
   int tag2;
   bool final_prediction;
+  uint64_t br_pc_used_for_pred_gen = 0;
 };
 
 template <class TAGE_CONFIG>
@@ -566,7 +567,7 @@ class Tage_2tag{
                                 [indices[prediction_info.alt_bank[tag_2]]];
             alt_matched_entry.pred_counter.update(resolve_dir);
           } else {
-            update_bimodal(br_pc, resolve_dir, tag_2);
+            update_bimodal(prediction_info.br_pc_used_for_pred_gen, resolve_dir, tag_2);
           }
         }
       }
@@ -588,7 +589,7 @@ class Tage_2tag{
         }
       }
     } else {
-      update_bimodal(br_pc, resolve_dir, tag_2);
+      update_bimodal(prediction_info.br_pc_used_for_pred_gen, resolve_dir, tag_2);
     }
 
     if(prediction_info.longest_match_prediction[tag_2] !=
