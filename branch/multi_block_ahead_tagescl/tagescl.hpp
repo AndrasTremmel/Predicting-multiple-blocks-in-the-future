@@ -123,6 +123,7 @@ bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc) {
   auto& future_prediction_info = prediction_info_buffer_[branch_id + MULTI_BLOCK_AHEAD_DISTANCE];
   tage_.get_prediction(br_pc, &future_prediction_info.tage);
   future_prediction_info.tage_prediction_valid = true;
+  future_prediction_info.tage.br_pc_used_for_pred_gen = br_pc;
   future_prediction_info.final_prediction = future_prediction_info.tage.prediction;
 
 
