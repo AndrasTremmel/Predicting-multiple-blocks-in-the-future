@@ -71,9 +71,11 @@ void O3_CPU::last_branch_result(std::uint64_t ip, std::uint64_t target,
       branch_type == BRANCH_RETURN or branch_type == BRANCH_OTHER;
   predictor.impl.update_speculative_state(predictor.id, ip, type, taken,
                                           target);
-  if (type.is_conditional) {
-    predictor.impl.commit_state(predictor.id, ip, type, taken, target);
-  }
+  // if (type.is_conditional) {
+  //   predictor.impl.commit_state(predictor.id, ip, type, taken, target);
+  // }
+  predictor.impl.commit_state(predictor.id, ip, type, taken, target);
+
   predictor.impl.commit_state_at_retire(predictor.id, ip, type, taken, target);
   predictor.state = ChampsimTageScl::NONE;
 }

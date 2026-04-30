@@ -557,7 +557,7 @@ class Tage {
                                   [indices[prediction_info.alt_bank]];
             alt_matched_entry.pred_counter.update(resolve_dir);
           } else {
-            update_bimodal(prediction_info.br_pc_used_for_pred_gen, resolve_dir);
+            update_bimodal(br_pc, resolve_dir);
           }
         }
       }
@@ -579,7 +579,7 @@ class Tage {
         }
       }
     } else {
-      update_bimodal(prediction_info.br_pc_used_for_pred_gen, resolve_dir);
+      update_bimodal(br_pc, resolve_dir);
     }
 
     if (prediction_info.longest_match_prediction !=

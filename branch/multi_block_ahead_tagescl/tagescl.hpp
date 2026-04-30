@@ -150,14 +150,14 @@ template <class CONFIG>
 void Tage_SC_L<CONFIG>::commit_state(uint32_t branch_id, uint64_t br_pc,
                                      Branch_Type br_type, bool resolve_dir) {
 
-  // Only update TAGE for conditional branches                                  
-  if (!br_type.is_conditional) {
-    return;
-  }
+  // // Only update TAGE for conditional branches                                  
+  // if (!br_type.is_conditional) {
+  //   return;
+  // }
   auto& prediction_info = prediction_info_buffer_[branch_id];
   
   if(prediction_info.tage_prediction_valid) {
-    tage_.commit_state(br_pc, resolve_dir, prediction_info.tage, prediction_info.final_prediction);
+    tage_.commit_state(prediction_info.tage.br_pc_used_for_pred_gen, resolve_dir, prediction_info.tage, prediction_info.final_prediction);
   }
 }
 

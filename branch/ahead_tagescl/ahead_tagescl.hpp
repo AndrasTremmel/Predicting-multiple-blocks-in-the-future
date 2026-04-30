@@ -731,13 +731,13 @@ void Tage_SC_L<CONFIG>::commit_state(uint32_t branch_id, uint64_t br_pc,
   }
   
 
-  // Only update TAGE on conditional branches
-  if (!br_type.is_conditional) {
-    return;
-  }
+  // // Only update TAGE on conditional branches
+  // if (!br_type.is_conditional) {
+  //   return;
+  // }
   if(prediction_info.tage_prediction_valid) {
     //std::cout << "Tage prediction valid, starting commit for tage..." << std::endl;
-    tage_.commit_state(br_pc, resolve_dir, prediction_info.tage,
+    tage_.commit_state(prediction_info.tage.br_pc_used_for_pred_gen, resolve_dir, prediction_info.tage,
         prediction_info.final_prediction, prediction_info.tage.tag2);
     //std::cout << "Finished tage commit" << std::endl;
   }
