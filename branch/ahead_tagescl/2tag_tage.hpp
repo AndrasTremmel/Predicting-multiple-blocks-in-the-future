@@ -482,7 +482,15 @@ class Tage_2tag{
         if(tables_enabled_.arr[i]) {
           Tagged_Entry& bank_entry = tagged_table_ptrs_[i][indices[i]];
           if(bank_entry.useful.get() == 0) {
-            if(std::abs(2 * bank_entry.pred_counter.get() + 1) <= 3) {
+
+            // *** PROMOTION CHECK ***
+            // Same ahead history (primary tag match) but different missing-history
+            // pattern (secondary tag mismatch): do NOT overwrite. Treat this slot
+            // as occupied and let the loop promote to a higher-history table.
+            if(bank_entry.tag == tags[i] && bank_entry.tag_2 != tag_2) {
+                // fall through to try the sibling bank below
+            }
+            else if(std::abs(2 * bank_entry.pred_counter.get() + 1) <= 3) {
               bank_entry.tag = tags[i];
               bank_entry.tag_2 = tag_2;
               bank_entry.pred_counter.set(resolve_dir ? 0 : -1);
@@ -515,7 +523,14 @@ class Tage_2tag{
             Tagged_Entry& bank_entry = tagged_table_ptrs_[i][indices[i]];
 
             if(bank_entry.useful.get() == 0) {
-              if(std::abs(2 * bank_entry.pred_counter.get() + 1) <= 3) {
+              // *** PROMOTION CHECK ***
+              // Same ahead history (primary tag match) but different missing-history
+              // pattern (secondary tag mismatch): do NOT overwrite. Treat this slot
+              // as occupied and let the loop promote to a higher-history table.
+              if(bank_entry.tag == tags[i] && bank_entry.tag_2 != tag_2) {
+                  // fall through to try the sibling bank below
+              }
+              else if(std::abs(2 * bank_entry.pred_counter.get() + 1) <= 3) {
                 bank_entry.tag = tags[i];
                 bank_entry.tag_2 = tag_2;
                 bank_entry.pred_counter.set(resolve_dir ? 0 : -1);
