@@ -126,6 +126,19 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
       ::SAS[this].pop_front();
   }
 
+  // ---- INDIRECT ----
+  if ((branch_type == BRANCH_INDIRECT) || (branch_type == BRANCH_INDIRECT_CALL)) {
+    auto hash = (ip >> 2) ^ ::CONDITIONAL_HISTORY[this].to_ullong();
+    ::INDIRECT_BTB[this][hash % std::size(::INDIRECT_BTB[this])] = branch_target;
+  }
+
+
+  // ---- CONDITIONAL HISTORY ----
+  if ((branch_type == BRANCH_CONDITIONAL) || (branch_type == BRANCH_OTHER)) {
+    ::CONDITIONAL_HISTORY[this] <<= 1;
+    ::CONDITIONAL_HISTORY[this].set(0, taken);
+  }
+
   // ---- RETURN ----
   if (branch_type == BRANCH_RETURN && !std::empty(::RAS[this])) {
     auto call_ip = ::RAS[this].back();
@@ -134,23 +147,15 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
     if (!std::empty(::SAS[this]))
       ::SAS[this].pop_back();
 
-    auto estimated_size = std::abs((long)(call_ip - branch_target));
-    if (estimated_size <= 10) {
-      ::CALL_SIZE[this][call_ip % std::size(::CALL_SIZE[this])] = estimated_size;
+    auto estimated_call_instr_size = (call_ip > branch_target) ? call_ip - branch_target : branch_target - call_ip;
+    if (estimated_call_instr_size <= 10) {
+      ::CALL_SIZE[this][call_ip % std::size(::CALL_SIZE[this])] = estimated_call_instr_size;
     }
   }
 
-  // ---- INDIRECT ----
-  if ((branch_type == BRANCH_INDIRECT) || (branch_type == BRANCH_INDIRECT_CALL)) {
-    auto hash = (ip >> 2) ^ ::CONDITIONAL_HISTORY[this].to_ullong();
-    ::INDIRECT_BTB[this][hash % std::size(::INDIRECT_BTB[this])] = branch_target;
-  }
+ 
 
-  // ---- CONDITIONAL HISTORY ----
-  if ((branch_type == BRANCH_CONDITIONAL) || (branch_type == BRANCH_OTHER)) {
-    ::CONDITIONAL_HISTORY[this] <<= 1;
-    ::CONDITIONAL_HISTORY[this].set(0, taken);
-  }
+
 
   // ---- Determine type ----
   auto type = branch_info::ALWAYS_TAKEN;
@@ -189,7 +194,9 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
   auto opt_entry = ::MBTB.at(this).check_hit({prev_ip, branch_target, type, prev_trans});
 
   if (opt_entry.has_value()) {
-    opt_entry->target = branch_target;
+    if (branch_target != 0) {
+      opt_entry->target = branch_target;
+    }
     opt_entry->type = type;
   }
 
