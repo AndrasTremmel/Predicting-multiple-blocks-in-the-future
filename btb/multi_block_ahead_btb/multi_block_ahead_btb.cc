@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <utility>
 #include <cstdlib>
+#include <iostream>
 
 #include "msl/lru_table.h"
 #include "ooo_cpu.h"

@@ -24,6 +24,7 @@
 
 #include <cmath>
 #include <vector>
+#include <iostream>
 
 #include "utils.hpp"
 
@@ -710,17 +711,17 @@ class Tage {
   }
 
  private:
-  struct Stats {
-    uint64_t total_preds = 0;
-    uint64_t total_mispreds = 0;
-    uint64_t bimodal_fallbacks = 0;
-    uint64_t tagged_hits = 0;
-    uint64_t alt_used = 0;
-    uint64_t longest_used = 0;
-    uint64_t allocations = 0;
-    uint64_t weak_longest_correct = 0;
-    uint64_t weak_longest_wrong = 0;
-    uint64_t bank_hits[2 * TAGE_CONFIG::NUM_HISTORIES + 1] = {};
+   struct Stats {
+    mutable uint64_t total_preds = 0;
+    mutable uint64_t total_mispreds = 0;
+    mutable uint64_t bimodal_fallbacks = 0;
+    mutable uint64_t tagged_hits = 0;
+    mutable uint64_t alt_used = 0;
+    mutable uint64_t longest_used = 0;
+    mutable uint64_t allocations = 0;
+    mutable uint64_t weak_longest_correct = 0;
+    mutable uint64_t weak_longest_wrong = 0;
+    mutable uint64_t bank_hits[2 * TAGE_CONFIG::NUM_HISTORIES + 1] = {};
   } stats_;
 #endif
 
