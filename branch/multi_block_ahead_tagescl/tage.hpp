@@ -27,6 +27,9 @@
 
 #include "utils.hpp"
 
+// Uncomment the following line to enable TAGE end-of-simulation debug statistics
+#define TAGE_DEBUG_STATS
+
 namespace tagescl {
 
 /* The main history register suitable for very large history. The history is
@@ -332,6 +335,10 @@ class Tage {
     auto& indices = prediction_info->indices;
     auto& tags = prediction_info->tags;
 
+    TAGE_DBG("[TAGE::PRED] br_pc=0x" << std::hex << br_pc << std::dec
+             << " idx1=" << indices[1] << " tag1=" << tags[1]
+             << " idx2=" << indices[2] << " tag2=" << tags[2]);
+
     // First use the bimodal table to make an initial prediction.
     Bimodal_Output bimodal_output = get_bimodal_prediction_confidence(br_pc);
     prediction_info->alt_prediction = bimodal_output.prediction;
@@ -350,6 +357,9 @@ class Tage {
         get_two_longest_matching_tables(indices, tags);
     prediction_info->hit_bank = matched_banks.hit_bank;
     prediction_info->alt_bank = matched_banks.alt_bank;
+    
+    TAGE_DBG("[TAGE::PRED] hit_bank=" << prediction_info->hit_bank << " alt_bank=" << prediction_info->alt_bank);
+    
     if (prediction_info->hit_bank != 0) {
       int8_t longest_match_counter =
           tagged_table_ptrs_[prediction_info->hit_bank]
@@ -387,6 +397,26 @@ class Tage {
           std::abs(2 * longest_match_counter + 1) == 5;
       prediction_info->low_confidence =
           std::abs(2 * longest_match_counter + 1) == 1;
+          
+#ifdef TAGE_DEBUG_STATS
+      stats_.total_preds++;
+      stats_.tagged_hits++;
+      stats_.bank_hits[prediction_info->hit_bank]++;
+      if (prediction_info->prediction == prediction_info->longest_match_prediction)
+          stats_.longest_used++;
+      else
+          stats_.alt_used++;
+#endif
+          
+      TAGE_DBG("[TAGE::PRED] longest_pred=" << prediction_info->longest_match_prediction
+               << " alt_pred=" << prediction_info->alt_prediction
+               << " final_pred=" << prediction_info->prediction);
+    } else {
+#ifdef TAGE_DEBUG_STATS
+      stats_.total_preds++;
+      stats_.bimodal_fallbacks++;
+#endif
+      TAGE_DBG("[TAGE::PRED] BIMODAL_FALLBACK pred=" << prediction_info->prediction);
     }
   }
 
@@ -396,6 +426,7 @@ class Tage {
       Tage_Prediction_Info<TAGE_CONFIG>* prediction_info) {
     tage_histories_.push_into_history(br_pc, br_target, br_type,
                                       final_prediction, prediction_info);
+    TAGE_DBG("[TAGE::SPEC_UPD] pushed bits=" << prediction_info->num_global_history_bits);
   }
 
   void commit_state(uint64_t br_pc, bool resolve_dir,
@@ -404,6 +435,19 @@ class Tage {
     const int* indices = prediction_info.indices;
     const int* tags = prediction_info.tags;
 
+#ifdef TAGE_DEBUG_STATS
+    if (prediction_info.prediction != resolve_dir)
+        stats_.total_mispreds++;
+#endif
+
+    TAGE_DBG("[TAGE::UPD] br_pc=0x" << std::hex << br_pc << std::dec
+             << " resolve=" << resolve_dir
+             << " final_pred=" << final_prediction
+             << " hit_bank=" << prediction_info.hit_bank
+             << " alt_bank=" << prediction_info.alt_bank
+             << " pred=" << prediction_info.prediction
+             << " longest=" << prediction_info.longest_match_prediction);
+
     tage_histories_.commit_path_history_ =
         prediction_info.path_history_commit_checkpoint;
 
@@ -411,6 +455,8 @@ class Tage {
         (prediction_info.prediction != resolve_dir) &&
         (prediction_info.hit_bank <
          Tage_Histories<TAGE_CONFIG>::twice_num_histories_);
+         
+    TAGE_DBG("[TAGE::UPD] allocate_new_entry=" << allocate_new_entry);
 
     if (prediction_info.hit_bank > 0) {
       // Manage the selection between longest matching and alternate
@@ -426,6 +472,12 @@ class Tage {
           tagged_table_ptrs_[prediction_info.hit_bank]
                             [indices[prediction_info.hit_bank]];
       if (std::abs(2 * matched_entry.pred_counter.get() + 1) <= 1) {
+#ifdef TAGE_DEBUG_STATS
+        if (prediction_info.longest_match_prediction == resolve_dir)
+            stats_.weak_longest_correct++;
+        else
+            stats_.weak_longest_wrong++;
+#endif
         if (prediction_info.longest_match_prediction == resolve_dir) {
           // If it was delivering the correct prediction, no need to
           // allocate a
@@ -455,6 +507,9 @@ class Tage {
     }
 
     if (allocate_new_entry) {
+#ifdef TAGE_DEBUG_STATS
+      stats_.allocations++;
+#endif
       int num_extra_entries_to_allocate =
           TAGE_CONFIG::EXTRA_ENTRIES_TO_ALLOCATE;
       int tick_penalty = 0;
@@ -544,7 +599,11 @@ class Tage {
     }
 
     // Update prediction
-    if (prediction_info.hit_bank > 0) {
+    if(prediction_info.hit_bank > 0) {
+      TAGE_DBG("[TAGE::UPD] updating hit_bank=" << prediction_info.hit_bank
+               << " idx=" << indices[prediction_info.hit_bank]
+               << " tag=" << tags[prediction_info.hit_bank]
+               << " counter_before=" << (int)tagged_table_ptrs_[prediction_info.hit_bank][indices[prediction_info.hit_bank]].pred_counter.get());
       Tagged_Entry& matched_entry =
           tagged_table_ptrs_[prediction_info.hit_bank]
                             [indices[prediction_info.hit_bank]];
@@ -579,6 +638,7 @@ class Tage {
         }
       }
     } else {
+      TAGE_DBG("[TAGE::UPD] updating BIMODAL (hit_bank=0)");
       update_bimodal(br_pc, resolve_dir);
     }
 
@@ -594,6 +654,7 @@ class Tage {
 
   void commit_state_at_retire(
       const Tage_Prediction_Info<TAGE_CONFIG>& prediction_info) {
+    TAGE_DBG("[TAGE::RET] retiring " << prediction_info.num_global_history_bits << " history bits");
     tage_histories_.history_register_.retire(
         prediction_info.num_global_history_bits);
   }
@@ -624,6 +685,44 @@ class Tage {
       Tage_Prediction_Info<TAGE_CONFIG>* prediction_info) {
     *prediction_info = {};
   }
+
+#ifdef TAGE_DEBUG_STATS
+ public:
+  ~Tage() {
+    std::cerr << "\n========== MULTI-BLOCK TAGE DEBUG STATISTICS ==========\n";
+    std::cerr << "Total predictions:        " << stats_.total_preds << "\n";
+    std::cerr << "Total mispredictions:     " << stats_.total_mispreds << "\n";
+    if (stats_.total_preds > 0)
+        std::cerr << "Misprediction rate:       " << (100.0 * stats_.total_mispreds / stats_.total_preds) << "%\n";
+    std::cerr << "Bimodal fallbacks:        " << stats_.bimodal_fallbacks << "\n";
+    std::cerr << "Tagged table hits:        " << stats_.tagged_hits << "\n";
+    std::cerr << "Longest match used:       " << stats_.longest_used << "\n";
+    std::cerr << "Alt prediction used:      " << stats_.alt_used << "\n";
+    std::cerr << "New entries allocated:    " << stats_.allocations << "\n";
+    std::cerr << "Weak longest correct:     " << stats_.weak_longest_correct << "\n";
+    std::cerr << "Weak longest wrong:       " << stats_.weak_longest_wrong << "\n";
+    std::cerr << "Bank hit distribution:\n";
+    for (int i = 1; i <= Tage_Histories<TAGE_CONFIG>::twice_num_histories_; ++i) {
+        if (stats_.bank_hits[i] > 0)
+            std::cerr << "  Bank " << i << ": " << stats_.bank_hits[i] << "\n";
+    }
+    std::cerr << "=======================================================\n";
+  }
+
+ private:
+  struct Stats {
+    uint64_t total_preds = 0;
+    uint64_t total_mispreds = 0;
+    uint64_t bimodal_fallbacks = 0;
+    uint64_t tagged_hits = 0;
+    uint64_t alt_used = 0;
+    uint64_t longest_used = 0;
+    uint64_t allocations = 0;
+    uint64_t weak_longest_correct = 0;
+    uint64_t weak_longest_wrong = 0;
+    uint64_t bank_hits[2 * TAGE_CONFIG::NUM_HISTORIES + 1] = {};
+  } stats_;
+#endif
 
  private:
   struct Bimodal_Entry {

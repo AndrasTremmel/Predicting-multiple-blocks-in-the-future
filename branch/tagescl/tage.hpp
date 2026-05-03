@@ -27,6 +27,9 @@
 
 #include "utils.hpp"
 
+// Uncomment the following line to enable TAGE end-of-simulation debug statistics
+#define TAGE_DEBUG_STATS
+
 namespace tagescl {
 
 /* The main history register suitable for very large history. The history is
@@ -385,6 +388,20 @@ class Tage {
           std::abs(2 * longest_match_counter + 1) == 5;
       prediction_info->low_confidence =
           std::abs(2 * longest_match_counter + 1) == 1;
+#ifdef TAGE_DEBUG_STATS
+      stats_.total_preds++;
+      stats_.tagged_hits++;
+      stats_.bank_hits[prediction_info->hit_bank]++;
+      if (prediction_info->prediction == prediction_info->longest_match_prediction)
+          stats_.longest_used++;
+      else
+          stats_.alt_used++;
+#endif
+    } else {
+#ifdef TAGE_DEBUG_STATS
+      stats_.total_preds++;
+      stats_.bimodal_fallbacks++;
+#endif
     }
   }
 
@@ -401,6 +418,11 @@ class Tage {
                     bool final_prediction) {
     const int* indices = prediction_info.indices;
     const int* tags = prediction_info.tags;
+
+#ifdef TAGE_DEBUG_STATS
+    if (prediction_info.prediction != resolve_dir)
+        stats_.total_mispreds++;
+#endif
 
     tage_histories_.commit_path_history_ =
         prediction_info.path_history_commit_checkpoint;
@@ -424,6 +446,12 @@ class Tage {
           tagged_table_ptrs_[prediction_info.hit_bank]
                             [indices[prediction_info.hit_bank]];
       if (std::abs(2 * matched_entry.pred_counter.get() + 1) <= 1) {
+#ifdef TAGE_DEBUG_STATS
+        if (prediction_info.longest_match_prediction == resolve_dir)
+            stats_.weak_longest_correct++;
+        else
+            stats_.weak_longest_wrong++;
+#endif
         if (prediction_info.longest_match_prediction == resolve_dir) {
           // If it was delivering the correct prediction, no need to
           // allocate a
@@ -453,6 +481,9 @@ class Tage {
     }
 
     if (allocate_new_entry) {
+#ifdef TAGE_DEBUG_STATS
+      stats_.allocations++;
+#endif
       int num_extra_entries_to_allocate =
           TAGE_CONFIG::EXTRA_ENTRIES_TO_ALLOCATE;
       int tick_penalty = 0;
@@ -622,6 +653,44 @@ class Tage {
       Tage_Prediction_Info<TAGE_CONFIG>* prediction_info) {
     *prediction_info = {};
   }
+
+#ifdef TAGE_DEBUG_STATS
+ public:
+  ~Tage() {
+    std::cerr << "\n========== BASELINE TAGE DEBUG STATISTICS ==========\n";
+    std::cerr << "Total predictions:        " << stats_.total_preds << "\n";
+    std::cerr << "Total mispredictions:     " << stats_.total_mispreds << "\n";
+    if (stats_.total_preds > 0)
+        std::cerr << "Misprediction rate:       " << (100.0 * stats_.total_mispreds / stats_.total_preds) << "%\n";
+    std::cerr << "Bimodal fallbacks:        " << stats_.bimodal_fallbacks << "\n";
+    std::cerr << "Tagged table hits:        " << stats_.tagged_hits << "\n";
+    std::cerr << "Longest match used:       " << stats_.longest_used << "\n";
+    std::cerr << "Alt prediction used:      " << stats_.alt_used << "\n";
+    std::cerr << "New entries allocated:    " << stats_.allocations << "\n";
+    std::cerr << "Weak longest correct:     " << stats_.weak_longest_correct << "\n";
+    std::cerr << "Weak longest wrong:       " << stats_.weak_longest_wrong << "\n";
+    std::cerr << "Bank hit distribution:\n";
+    for (int i = 1; i <= Tage_Histories<TAGE_CONFIG>::twice_num_histories_; ++i) {
+        if (stats_.bank_hits[i] > 0)
+            std::cerr << "  Bank " << i << ": " << stats_.bank_hits[i] << "\n";
+    }
+    std::cerr << "=======================================================\n";
+  }
+
+ private:
+  struct Stats {
+    uint64_t total_preds = 0;
+    uint64_t total_mispreds = 0;
+    uint64_t bimodal_fallbacks = 0;
+    uint64_t tagged_hits = 0;
+    uint64_t alt_used = 0;
+    uint64_t longest_used = 0;
+    uint64_t allocations = 0;
+    uint64_t weak_longest_correct = 0;
+    uint64_t weak_longest_wrong = 0;
+    uint64_t bank_hits[2 * TAGE_CONFIG::NUM_HISTORIES + 1] = {};
+  } stats_;
+#endif
 
  private:
   struct Bimodal_Entry {

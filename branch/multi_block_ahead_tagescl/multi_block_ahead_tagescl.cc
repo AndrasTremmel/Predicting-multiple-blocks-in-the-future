@@ -52,12 +52,18 @@ std::uint8_t O3_CPU::predict_branch(std::uint64_t ip) {
   }
   predictor.id = predictor.impl.get_new_branch_id();
   bool prediction = predictor.impl.get_prediction(predictor.id, ip);
+  
+  TAGE_DBG("[WRAP_PRED] ip=0x" << std::hex << ip << std::dec
+           << " id=" << predictor.id
+           << " prediction=" << prediction
+           << " state=" << predictor.state);
+           
   predictor.last_ip = ip;
   predictor.state = ChampsimTageScl::PREDICTED;
   return prediction;
 }
 
-void O3_CPU::last_branch_result(std::uint64_t ip, std::uint64_t target,
+void O3_CPU::last_branch_result(std::uint64_t ip, uint64_t target,
                                 std::uint8_t taken, std::uint8_t branch_type) {
   ChampsimTageScl& predictor = get_predictor(this);
   assert(predictor.state == ChampsimTageScl::PREDICTED);
@@ -68,6 +74,15 @@ void O3_CPU::last_branch_result(std::uint64_t ip, std::uint64_t target,
   type.is_indirect =
       branch_type == BRANCH_INDIRECT or branch_type == BRANCH_INDIRECT_CALL or
       branch_type == BRANCH_RETURN or branch_type == BRANCH_OTHER;
+      
+  TAGE_DBG("[WRAP_RES] ip=0x" << std::hex << ip << std::dec
+           << " target=0x" << std::hex << target << std::dec
+           << " taken=" << (int)taken
+           << " type=" << (int)branch_type
+           << " id=" << predictor.id
+           << " is_cond=" << type.is_conditional
+           << " is_indir=" << type.is_indirect);
+
   predictor.impl.update_speculative_state(predictor.id, ip, type, taken,
                                           target);
   // if (type.is_conditional) {

@@ -10,6 +10,9 @@
 #include "msl/lru_table.h"
 #include "ooo_cpu.h"
 
+// Uncomment the following line to enable BTB end-of-simulation debug statistics
+#define BTB_DEBUG_STATS
+
 
 
 
@@ -64,6 +67,38 @@ std::map<O3_CPU*, std::array<uint64_t, CALL_SIZE_TRACKERS>> CALL_SIZE;
 std::map<O3_CPU*, uint64_t> LAST_BRANCH_IP;
 std::map<O3_CPU*, mbtb_transition> LAST_TRANSITION;
 
+#ifdef BTB_DEBUG_STATS
+struct MBTBStats {
+    uint64_t total_lookups = 0;
+    uint64_t total_misses = 0;
+    uint64_t return_hits = 0;
+    uint64_t indirect_hits = 0;
+    uint64_t conditional_hits = 0;
+    uint64_t always_taken_hits = 0;
+};
+
+std::map<O3_CPU*, MBTBStats> MBTB_STATS;
+
+struct MBTBStatsPrinter {
+    ~MBTBStatsPrinter() {
+        for (const auto& pair : MBTB_STATS) {
+            const auto& s = pair.second;
+            std::cerr << "\n========== MULTI-BLOCK BTB DEBUG STATISTICS ==========\n";
+            std::cerr << "Total lookups:         " << s.total_lookups << "\n";
+            std::cerr << "Total misses:          " << s.total_misses << "\n";
+            if (s.total_lookups > 0)
+                std::cerr << "Miss rate:             " << (100.0 * s.total_misses / s.total_lookups) << "%\n";
+            std::cerr << "Return hits:           " << s.return_hits << "\n";
+            std::cerr << "Indirect hits:         " << s.indirect_hits << "\n";
+            std::cerr << "Conditional hits:      " << s.conditional_hits << "\n";
+            std::cerr << "Always taken hits:     " << s.always_taken_hits << "\n";
+            std::cerr << "=====================================================\n";
+        }
+    }
+};
+static MBTBStatsPrinter mbtb_stats_printer;
+#endif
+
 } // namespace
 
 
@@ -86,6 +121,19 @@ std::pair<uint64_t, uint8_t> O3_CPU::btb_prediction(uint64_t ip)
   auto trans   = ::LAST_TRANSITION[this];
 
   auto entry = ::MBTB.at(this).check_hit({prev_ip, 0, branch_info::ALWAYS_TAKEN, trans});
+
+#ifdef BTB_DEBUG_STATS
+  auto& s = ::MBTB_STATS[this];
+  s.total_lookups++;
+  if (!entry.has_value()) {
+    s.total_misses++;
+  } else {
+    if (entry->type == branch_info::RETURN) s.return_hits++;
+    else if (entry->type == branch_info::INDIRECT) s.indirect_hits++;
+    else if (entry->type == branch_info::CONDITIONAL) s.conditional_hits++;
+    else if (entry->type == branch_info::ALWAYS_TAKEN) s.always_taken_hits++;
+  }
+#endif
 
   if (!entry.has_value())
     return {0, false};
@@ -154,6 +202,7 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
   }
 
  
+
 
 
 

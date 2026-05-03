@@ -24,6 +24,15 @@
 
 #include <cassert>
 #include <stdio.h>
+#include <iostream>
+#include <iomanip>
+
+namespace {
+inline uint64_t tage_debug_cnt = 0;
+}
+#define TAGE_DBG_LIMIT 5000
+#define TAGE_DBG(...) do { if (tage_debug_cnt < TAGE_DBG_LIMIT) { std::cerr << __VA_ARGS__ << std::endl; } } while(0)
+#define TAGE_DBG_INC() do { ++tage_debug_cnt; } while(0)
 
 
 namespace tagescl {
@@ -193,6 +202,7 @@ public:
     void deallocate_front(uint32_t pop_id) {
       assert(pop_id == read_id_);
       clear(pop_id);
+      TAGE_DBG("[CIRC_BUF] dealloc pop_id=" << pop_id << " -> new_read_id=" << (read_id_ + 1) << " new_alloc_id=" << (alloc_id_ + 1));
       read_id_++;
       alloc_id_++;
     }

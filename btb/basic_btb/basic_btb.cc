@@ -1,4 +1,3 @@
-
 /*
  * This file implements a basic Branch Target Buffer (BTB) structure.
  * It uses a set-associative BTB to predict the targets of non-return branches,
@@ -13,6 +12,9 @@
 
 #include "msl/lru_table.h"
 #include "ooo_cpu.h"
+
+// Uncomment the following line to enable BTB end-of-simulation debug statistics
+#define BTB_DEBUG_STATS
 
 namespace
 {
@@ -47,6 +49,39 @@ std::map<O3_CPU*, std::deque<uint64_t>> RAS;
  * find the target for a call's return, since calls may have different sizes.
  */
 std::map<O3_CPU*, std::array<uint64_t, CALL_SIZE_TRACKERS>> CALL_SIZE;
+
+#ifdef BTB_DEBUG_STATS
+struct BaselineBTBStats {
+    uint64_t total_lookups = 0;
+    uint64_t total_misses = 0;
+    uint64_t return_hits = 0;
+    uint64_t indirect_hits = 0;
+    uint64_t conditional_hits = 0;
+    uint64_t always_taken_hits = 0;
+};
+
+std::map<O3_CPU*, BaselineBTBStats> BTB_STATS;
+
+struct BaselineBTBStatsPrinter {
+    ~BaselineBTBStatsPrinter() {
+        for (const auto& pair : BTB_STATS) {
+            const auto& s = pair.second;
+            std::cerr << "\n========== BASELINE BTB DEBUG STATISTICS ==========\n";
+            std::cerr << "Total lookups:         " << s.total_lookups << "\n";
+            std::cerr << "Total misses:          " << s.total_misses << "\n";
+            if (s.total_lookups > 0)
+                std::cerr << "Miss rate:             " << (100.0 * s.total_misses / s.total_lookups) << "%\n";
+            std::cerr << "Return hits:           " << s.return_hits << "\n";
+            std::cerr << "Indirect hits:         " << s.indirect_hits << "\n";
+            std::cerr << "Conditional hits:      " << s.conditional_hits << "\n";
+            std::cerr << "Always taken hits:     " << s.always_taken_hits << "\n";
+            std::cerr << "==================================================\n";
+        }
+    }
+};
+static BaselineBTBStatsPrinter baseline_btb_stats_printer;
+#endif
+
 } // namespace
 
 void O3_CPU::initialize_btb()
@@ -61,6 +96,19 @@ std::pair<uint64_t, uint8_t> O3_CPU::btb_prediction(uint64_t ip)
 {
   // use BTB for all other branches + direct calls
   auto btb_entry = ::BTB.at(this).check_hit({ip, 0, ::branch_info::ALWAYS_TAKEN});
+
+#ifdef BTB_DEBUG_STATS
+  auto& s = ::BTB_STATS[this];
+  s.total_lookups++;
+  if (!btb_entry.has_value()) {
+    s.total_misses++;
+  } else {
+    if (btb_entry->type == ::branch_info::RETURN) s.return_hits++;
+    else if (btb_entry->type == ::branch_info::INDIRECT) s.indirect_hits++;
+    else if (btb_entry->type == ::branch_info::CONDITIONAL) s.conditional_hits++;
+    else if (btb_entry->type == ::branch_info::ALWAYS_TAKEN) s.always_taken_hits++;
+  }
+#endif
 
   // no prediction for this IP
   if (!btb_entry.has_value())

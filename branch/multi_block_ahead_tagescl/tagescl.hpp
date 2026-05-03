@@ -117,6 +117,11 @@ class Tage_SC_L : public Tage_SC_L_Base {
 
 template <class CONFIG>
 bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc) {
+  TAGE_DBG_INC();
+  TAGE_DBG("[TAGE_SC_L::GET] branch_id=" << branch_id << " br_pc=0x" << std::hex << br_pc << std::dec
+           << " read_id=" << prediction_info_buffer_.get_read_id()
+           << " alloc_id=" << prediction_info_buffer_.get_alloc_id());
+  
   // ************************************************************
   // * Create new prediction and add it to the prediction buffer
   // ************************************************************
@@ -126,7 +131,10 @@ bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc) {
   future_prediction_info.tage.br_pc_used_for_pred_gen = br_pc;
   future_prediction_info.final_prediction = future_prediction_info.tage.prediction;
 
-
+  TAGE_DBG("[TAGE_SC_L::GET] future_slot=" << (branch_id + MULTI_BLOCK_AHEAD_DISTANCE)
+           << " future_valid=1 future_pred=" << future_prediction_info.final_prediction
+           << " future_hit_bank=" << future_prediction_info.tage.hit_bank
+           << " future_alt_bank=" << future_prediction_info.tage.alt_bank);
 
   // ***********************************************************
   // * Get the prediction info for the current branch
@@ -137,11 +145,18 @@ bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc) {
   // Update branch pc since it was unkown up until now
   prediction_info.br_pc = br_pc;
 
+  TAGE_DBG("[TAGE_SC_L::GET] curr_slot=" << branch_id
+           << " curr_valid=" << prediction_info.tage_prediction_valid
+           << " curr_pred=" << prediction_info.final_prediction
+           << " curr_hit_bank=" << prediction_info.tage.hit_bank
+           << " curr_alt_bank=" << prediction_info.tage.alt_bank);
 
   if(prediction_info.tage_prediction_valid) {
+      TAGE_DBG("[TAGE_SC_L::GET] RETURNING curr_pred=" << prediction_info.final_prediction);
       return prediction_info.final_prediction;
   }
 
+  TAGE_DBG("[TAGE_SC_L::GET] RETURNING false (no valid curr)");
   return false;
 }
 
@@ -150,14 +165,28 @@ template <class CONFIG>
 void Tage_SC_L<CONFIG>::commit_state(uint32_t branch_id, uint64_t br_pc,
                                      Branch_Type br_type, bool resolve_dir) {
 
-  // // Only update TAGE for conditional branches                                  
-  // if (!br_type.is_conditional) {
-  //   return;
-  // }
+  // Only update TAGE for conditional branches                                  
+  if (!br_type.is_conditional) {
+    return;
+  }
   auto& prediction_info = prediction_info_buffer_[branch_id];
   
+  TAGE_DBG("[TAGE_SC_L::COM] branch_id=" << branch_id << " br_pc=0x" << std::hex << br_pc << std::dec
+           << " resolve_dir=" << resolve_dir
+           << " is_conditional=" << br_type.is_conditional
+           << " tage_valid=" << prediction_info.tage_prediction_valid
+           << " final_pred=" << prediction_info.final_prediction
+           << " hit_bank=" << prediction_info.tage.hit_bank
+           << " alt_bank=" << prediction_info.tage.alt_bank);
+  
   if(prediction_info.tage_prediction_valid) {
+    TAGE_DBG("[TAGE_SC_L::COM] calling tage_.commit_state with pred_pc=0x" << std::hex << prediction_info.tage.br_pc_used_for_pred_gen << std::dec
+             << " hit_bank=" << prediction_info.tage.hit_bank
+             << " idx=" << prediction_info.tage.indices[prediction_info.tage.hit_bank]
+             << " tag=" << prediction_info.tage.tags[prediction_info.tage.hit_bank]);
     tage_.commit_state(prediction_info.tage.br_pc_used_for_pred_gen, resolve_dir, prediction_info.tage, prediction_info.final_prediction);
+  } else {
+    TAGE_DBG("[TAGE_SC_L::COM] SKIPPED (no valid tage info)");
   }
 }
 
@@ -168,8 +197,13 @@ void Tage_SC_L<CONFIG>::commit_state_at_retire(uint32_t branch_id,
                                                Branch_Type br_type,
                                                bool resolve_dir,
                                                uint64_t br_target) {
-  //std::cout << "Starting retire for branch id: " << branch_id << std::endl;                                                
+  //std::cout << "Starting retire for branch id: " << branch_id << std::endl;                                                 
   auto& prediction_info = prediction_info_buffer_[branch_id];
+  
+  TAGE_DBG("[TAGE_SC_L::RET] branch_id=" << branch_id << " br_pc=0x" << std::hex << br_pc << std::dec
+           << " updated_history=" << prediction_info.updated_history
+           << " target=0x" << std::hex << br_target << std::dec);
+  
   // This can only hold for branch instructions as it 
   // requires speculative update to be already done 
   // on the instruction which is called from inside the 
@@ -180,10 +214,15 @@ void Tage_SC_L<CONFIG>::commit_state_at_retire(uint32_t branch_id,
     //std::cout << "Updated history changed..." << std::endl;
     
     //std::cout << "Calling tage reire..." << std::endl;
+    TAGE_DBG("[TAGE_SC_L::RET] retiring history bits=" << prediction_info.tage.num_global_history_bits);
     tage_.commit_state_at_retire(prediction_info.tage);
     
     //std::cout << "Deallocating front element of predicton info buffer..." << std::endl;
     prediction_info_buffer_.deallocate_front(branch_id);
+    TAGE_DBG("[TAGE_SC_L::RET] deallocated front, new_read=" << prediction_info_buffer_.get_read_id()
+             << " new_alloc=" << prediction_info_buffer_.get_alloc_id());
+  } else {
+    TAGE_DBG("[TAGE_SC_L::RET] SKIPPED dealloc (updated_history=false)");
   }
 }
 
@@ -197,6 +236,12 @@ void Tage_SC_L<CONFIG>::update_speculative_state(uint32_t branch_id,
   auto& prediction_info = prediction_info_buffer_[branch_id];
   prediction_info.rng_seed = random_number_gen_.seed_;
   prediction_info.updated_history = true;
+  
+  TAGE_DBG("[TAGE_SC_L::UPD] branch_id=" << branch_id << " br_pc=0x" << std::hex << br_pc << std::dec
+           << " dir=" << branch_dir << " is_cond=" << br_type.is_conditional
+           << " is_indir=" << br_type.is_indirect
+           << " target=0x" << std::hex << br_target << std::dec);
+           
   tage_.update_speculative_state(br_pc, br_target, br_type, branch_dir,
                                  &prediction_info.tage);
 }
