@@ -40,9 +40,11 @@ struct mbtb_entry_t {
   branch_info type = branch_info::ALWAYS_TAKEN;
 
   mbtb_transition transition = mbtb_transition::N;
+  uint64_t hist_bits = 0;     // snapshot of low bits of conditional history at predict/update time
+
 
   auto index() const { return ip_tag >> 2; }
-  auto tag() const { return (ip_tag >> 2) ^ static_cast<uint64_t>(transition); }
+  auto tag() const { return (ip_tag >> 2) ^ (static_cast<uint64_t>(transition) << 14) ^ (hist_bits & 0xFFF); }
 };
 
 // ---- STORAGE ----
@@ -121,7 +123,10 @@ std::pair<uint64_t, uint8_t> O3_CPU::btb_prediction(uint64_t ip)
   auto prev_ip = ::LAST_BRANCH_IP[this];
   auto trans   = ::LAST_TRANSITION[this];
 
-  auto entry = ::MBTB.at(this).check_hit({prev_ip, 0, branch_info::ALWAYS_TAKEN, trans});
+  uint64_t hist_snap = ::CONDITIONAL_HISTORY[this].to_ullong() & 0xFFF;
+
+
+  auto entry = ::MBTB.at(this).check_hit({prev_ip, 0, branch_info::ALWAYS_TAKEN, trans, hist_snap});
 
 #ifdef BTB_DEBUG_STATS
   auto& s = ::MBTB_STATS[this];
@@ -241,7 +246,9 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
   auto prev_ip = ::LAST_BRANCH_IP[this];
   auto prev_trans = ::LAST_TRANSITION[this];
 
-  auto opt_entry = ::MBTB.at(this).check_hit({prev_ip, branch_target, type, prev_trans});
+  uint64_t hist_snap_for_update = ::CONDITIONAL_HISTORY[this].to_ullong() & 0xFFF;
+
+  auto opt_entry = ::MBTB.at(this).check_hit({prev_ip, branch_target, type, prev_trans, hist_snap_for_update});
 
   if (opt_entry.has_value()) {
     if (branch_target != 0) {
@@ -252,7 +259,7 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
 
   if (branch_target != 0) {
     ::MBTB.at(this).fill(
-        opt_entry.value_or(mbtb_entry_t{prev_ip, branch_target, type, prev_trans})
+        opt_entry.value_or(mbtb_entry_t{prev_ip, branch_target, type, prev_trans, hist_snap_for_update})
     );
   }
 

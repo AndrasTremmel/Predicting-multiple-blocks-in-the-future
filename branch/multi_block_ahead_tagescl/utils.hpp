@@ -30,7 +30,7 @@
 namespace {
 inline uint64_t tage_debug_cnt = 0;
 }
-#define TAGE_DBG_LIMIT 5000
+#define TAGE_DBG_LIMIT 0
 #define TAGE_DBG(...) do { if (tage_debug_cnt < TAGE_DBG_LIMIT) { std::cerr << __VA_ARGS__ << std::endl; } } while(0)
 #define TAGE_DBG_INC() do { ++tage_debug_cnt; } while(0)
 
