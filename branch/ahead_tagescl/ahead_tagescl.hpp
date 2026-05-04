@@ -165,322 +165,322 @@ class Tage_SC_L : public Tage_SC_L_Base {
   CircularBuffer<Tage_SC_L_Prediction_Info<CONFIG>> prediction_info_buffer_;
 };
 
-template <class CONFIG>
-uns Tage_SC_L<CONFIG>::get_recent_hist_hash(uint64_t br_pc) {
-  if (SND_TAG_NO_PRED == 1) {
-    return 0;
-  }
-  if (AHEAD_DISTANCE == 0) {
-    return ((br_pc >> 1) ^ (br_pc >> 4)) & (SND_TAG_NO_PRED - 1);
-  }
-
-  const uns mask = SND_TAG_NO_PRED - 1;
-  const int width_bits = __builtin_ctz(SND_TAG_NO_PRED);  // log2(SND_TAG_NO_PRED)
-
-  uns selection = 0;
-
-  // Process the AHEAD_DISTANCE skipped branches in order from oldest to newest,
-  // matching the paper's "for every branch skipped" iteration.
-  const int q_size = (int)future_tage_response_delay_queue.size();
-  const int start  = q_size - AHEAD_DISTANCE;
-  for (int i = start; i < q_size; i++) {
-    uint64_t addr = future_tage_response_delay_queue[i].br_npc;
-
-    // selection = selection XOR addr[6:2] XOR addr[11:7]
-    uns low  = (addr >> 2) & 0x1F;
-    uns high = (addr >> 7) & 0x1F;
-    selection ^= (low ^ high);
-
-    // selection = ROTATE_RIGHT_BY_1(selection), within the tag width
-    selection = ((selection >> 1) | (selection << (width_bits - 1))) & mask;
-  }
-
-  return selection;
-}
-
-
 // template <class CONFIG>
 // uns Tage_SC_L<CONFIG>::get_recent_hist_hash(uint64_t br_pc) {
-//   //std::cout << "Calculating missing history hash for branch pc: " << br_pc << std::endl;
-//   uns res = 0;
-//   uns j = 0;
-//   uint64_t current;
-//   if(SND_TAG_NO_PRED == 1){
+//   if (SND_TAG_NO_PRED == 1) {
 //     return 0;
 //   }
-//   if(AHEAD_DISTANCE == 0){
-//     return ((br_pc>>1) ^ (br_pc>>4)) & 0x07;
+//   if (AHEAD_DISTANCE == 0) {
+//     return ((br_pc >> 1) ^ (br_pc >> 4)) & (SND_TAG_NO_PRED - 1);
 //   }
-//   for(int i = (int)future_tage_response_delay_queue.size() - 1; i >= 0; i--){
-//     if(j == AHEAD_DISTANCE){
-//       break;
-//     }
-//     j++;
-//     current = future_tage_response_delay_queue[i].br_npc;
-//     if(SND_TAG_NO_PRED == 1){
-//       res = 0;
-//     }
-//     else if(SND_TAG_NO_PRED == 2){
-//       if(FFP_HASH_DIR){
-//         res = res ^ future_tage_response_delay_queue[i].current_pred;
-//       }
-//       for(uns k = 0; k < FFP_HASH_PC_BITS; k++){ 
-//         res = res ^ (current & 0x01);
-//         current = current >> 1;
-//       }
-//     }
-//     else if (SND_TAG_NO_PRED == 4) {
-//       res = res ^ future_tage_response_delay_queue[i].current_pred;
-//       if(FFP_HASH_PC_BITS == 0){
-//         res = res ^ current ^ (current >> 2);
-//         res = res & 0x03;
-//       }
-//       else if(FFP_HASH_PC_BITS == 1){
-//         res = res ^ (current >> 1) ^ (current >> 3);
-//         res = res & 0x03;
-//       }
-//       else if(FFP_HASH_PC_BITS == 2){
-//         res = res ^ (current >> 2) ^ (current >> 4);
-//         res = res & 0x03;
-//       }
-//       else{
-//         assert(false);
-//       }
-//       if(res & 0x02){
-//         res = (res << 1) + 1;
-//       }
-//       else{
-//         res = res << 1;
-//       }
-//       res = res & 0x03;
-//     }
-//     else if(SND_TAG_NO_PRED == 8){
-//       res = res ^ future_tage_response_delay_queue[i].current_pred;
-//       if(FFP_HASH_DIR_ONLY){
-//         assert(AHEAD_DISTANCE == 3);  
-//       }
-//       else if(FFP_HASH_PC_BITS == 0){
-//         res = res ^ current ^ (current >> 3);
-//       }
-//       else if(FFP_HASH_PC_BITS == 1){
-//         res = res ^ current;
-//       }
-//       else if(FFP_HASH_PC_BITS == 2){
-//         res = res ^ (current >> 1);
-//       }
-//       else if(FFP_HASH_PC_BITS == 3){
-//         res = res ^ (current >> 2);
-//       }
-//       else if(FFP_HASH_PC_BITS == 4){
-//         res = res ^ (current >> 3);
-//       }
-//       else if(FFP_HASH_PC_BITS == 5){
-//         res = res ^ (current >> 1) ^ (current >> 4);
-//       }
-//       else if(FFP_HASH_PC_BITS == 6){
-//         res = res ^ (current >> 2) ^ (current >> 5);
-//       }
-//       else{
-//         assert(false);
-//       }
-//       if(res & 0x04){
-//         res = (res << 1) + 1;
-//       }
-//       else{
-//         res = res << 1;
-//       }
-//       res = res & 0x07;
-//     }
-//     else if(SND_TAG_NO_PRED == 16){
-//       res = res ^ future_tage_response_delay_queue[i].current_pred;
-//       if(FFP_HASH_DIR_ONLY){
-//         assert(AHEAD_DISTANCE == 4);  
-//       }
-//       else if(FFP_HASH_PC_BITS == 0){
-//         res = res ^ current ^ (current >> 4);
-//       }
-//       else if(FFP_HASH_PC_BITS == 1){
-//         res = res ^ (current >> 1) ^ (current >> 5);
-//       }
-//       else if(FFP_HASH_PC_BITS == 2){
-//         res = res ^ (current >> 2) ^ (current >> 6);
-//       }
-//       else{
-//         assert(false);
-//       }
-//       if(res & 0x08){
-//         res = (res << 1) + 1;
-//       }
-//       else{
-//         res = res << 1;
-//       }
-//       res = res & 0x0f;
-//     }
-//     else if(SND_TAG_NO_PRED == 32){
-//       res = res ^ future_tage_response_delay_queue[i].current_pred;
-//       if(FFP_HASH_DIR_ONLY){
-//         assert(AHEAD_DISTANCE == 5);  
-//       }
-//       else if(FFP_HASH_PC_BITS == 0){
-//         res = res ^ current ^ (current >> 5);
-//       }
-//       else if(FFP_HASH_PC_BITS == 1){
-//         res = res ^ (current >> 1) ^ (current >> 6);
-//       }
-//       else if(FFP_HASH_PC_BITS == 2){
-//         res = res ^ (current >> 2) ^ (current >> 7);
-//       }
-//       else{
-//         assert(false);
-//       }
-//       if(res & 0x10){
-//         res = (res << 1) + 1;
-//       }
-//       else{
-//         res = res << 1;
-//       }
-//       res = res & 0x01f;
-//     }
-//     else if(SND_TAG_NO_PRED == 64){
-//       res = res ^ future_tage_response_delay_queue[i].current_pred;
-//       if(FFP_HASH_DIR_ONLY){
-//         assert(AHEAD_DISTANCE == 6);  
-//       }
-//       else if(FFP_HASH_PC_BITS == 1){
-//         res = res ^ (current >> 1) ^ (current >> 7);
-//       }
-//       else{
-//         assert(false);
-//       }
-//       if(res & 0x20){
-//         res = (res << 1) + 1;
-//       }
-//       else{
-//         res = res << 1;
-//       }
-//       res = res & 0x03f;
-//     }
-//     else if(SND_TAG_NO_PRED == 128){
-//       res = res ^ future_tage_response_delay_queue[i].current_pred;
-//       if(FFP_HASH_DIR_ONLY){
-//         assert(AHEAD_DISTANCE == 7);  
-//       }
-//       else if(FFP_HASH_PC_BITS == 1){
-//         res = res ^ (current >> 1) ^ (current >> 8);
-//       }
-//       else{
-//         assert(false);
-//       }
-//       if(res & 0x40){
-//         res = (res << 1) + 1;
-//       }
-//       else{
-//         res = res << 1;
-//       }
-//       res = res & 0x07f;
-//     }
-//     else if(SND_TAG_NO_PRED == 256){
-//       res = res ^ future_tage_response_delay_queue[i].current_pred;
-//       if(FFP_HASH_DIR_ONLY){
-//         assert(AHEAD_DISTANCE == 8);  
-//       }
-//       else if(FFP_HASH_PC_BITS == 1){
-//         res = res ^ (current >> 1) ^ (current >> 9);
-//       }
-//       else{
-//         assert(false);
-//       }
-//       if(res & 0x80){
-//         res = (res << 1) + 1;
-//       }
-//       else{
-//         res = res << 1;
-//       }
-//       res = res & 0x0ff;
-//     }
-//     else if(SND_TAG_NO_PRED == 512){
-//       res = res ^ future_tage_response_delay_queue[i].current_pred;
-//       if(FFP_HASH_DIR_ONLY){
-//         assert(AHEAD_DISTANCE == 9);  
-//       }
-//       else if(FFP_HASH_PC_BITS == 1){
-//         res = res ^ (current >> 1) ^ (current >> 10);
-//       }
-//       else{
-//         assert(false);
-//       }
-//       if(res & 0x100){
-//         res = (res << 1) + 1;
-//       }
-//       else{
-//         res = res << 1;
-//       }
-//       res = res & 0x1ff;
-//     }
-//     else if(SND_TAG_NO_PRED == 1024){
-//       res = res ^ future_tage_response_delay_queue[i].current_pred;
-//       if(FFP_HASH_DIR_ONLY){
-//         assert(AHEAD_DISTANCE == 10);  
-//       }
-//       else if(FFP_HASH_PC_BITS == 1){
-//         res = res ^ (current >> 1) ^ (current >> 11);
-//       }
-//       else{
-//         assert(false);
-//       }
-//       if(res & 0x200){
-//         res = (res << 1) + 1;
-//       }
-//       else{
-//         res = res << 1;
-//       }
-//       res = res & 0x3ff;
-//     }
-//     else if(SND_TAG_NO_PRED == 2048){
-//       res = res ^ future_tage_response_delay_queue[i].current_pred;
-//       if(FFP_HASH_DIR_ONLY){
-//         assert(AHEAD_DISTANCE == 11);  
-//       }
-//       else if(FFP_HASH_PC_BITS == 1){
-//         res = res ^ (current >> 1) ^ (current >> 12);
-//       }
-//       else{
-//         assert(false);
-//       }
-//       if(res & 0x400){
-//         res = (res << 1) + 1;
-//       }
-//       else{
-//         res = res << 1;
-//       }
-//       res = res & 0x7ff;
-//     }
-//     else if(SND_TAG_NO_PRED == 4096){
-//       res = res ^ future_tage_response_delay_queue[i].current_pred;
-//       if(FFP_HASH_DIR_ONLY){
-//         assert(AHEAD_DISTANCE == 12);  
-//       }
-//       else if(FFP_HASH_PC_BITS == 1){
-//         res = res ^ (current >> 1) ^ (current >> 13);
-//       }
-//       else{
-//         assert(false);
-//       }
-//       if(res & 0x800){
-//         res = (res << 1) + 1;
-//       }
-//       else{
-//         res = res << 1;
-//       }
-//       res = res & 0xfff;
-//     }
-//     else{
-//       assert(false);
-//     }
+
+//   const uns mask = SND_TAG_NO_PRED - 1;
+//   const int width_bits = __builtin_ctz(SND_TAG_NO_PRED);  // log2(SND_TAG_NO_PRED)
+
+//   uns selection = 0;
+
+//   // Process the AHEAD_DISTANCE skipped branches in order from oldest to newest,
+//   // matching the paper's "for every branch skipped" iteration.
+//   const int q_size = (int)future_tage_response_delay_queue.size();
+//   const int start  = q_size - AHEAD_DISTANCE;
+//   for (int i = start; i < q_size; i++) {
+//     uint64_t addr = future_tage_response_delay_queue[i].br_npc;
+
+//     // selection = selection XOR addr[6:2] XOR addr[11:7]
+//     uns low  = (addr >> 2) & 0x1F;
+//     uns high = (addr >> 7) & 0x1F;
+//     selection ^= (low ^ high);
+
+//     // selection = ROTATE_RIGHT_BY_1(selection), within the tag width
+//     selection = ((selection >> 1) | (selection << (width_bits - 1))) & mask;
 //   }
-//   //std::cout << "Calculated missing history hash for branch pc " << br_pc << " is " << res << std::endl;
-//   return res;
+
+//   return selection;
 // }
+
+
+template <class CONFIG>
+uns Tage_SC_L<CONFIG>::get_recent_hist_hash(uint64_t br_pc) {
+  //std::cout << "Calculating missing history hash for branch pc: " << br_pc << std::endl;
+  uns res = 0;
+  uns j = 0;
+  uint64_t current;
+  if(SND_TAG_NO_PRED == 1){
+    return 0;
+  }
+  if(AHEAD_DISTANCE == 0){
+    return ((br_pc>>1) ^ (br_pc>>4)) & 0x07;
+  }
+  for(int i = (int)future_tage_response_delay_queue.size() - 1; i >= 0; i--){
+    if(j == AHEAD_DISTANCE){
+      break;
+    }
+    j++;
+    current = future_tage_response_delay_queue[i].br_npc;
+    if(SND_TAG_NO_PRED == 1){
+      res = 0;
+    }
+    else if(SND_TAG_NO_PRED == 2){
+      if(FFP_HASH_DIR){
+        res = res ^ future_tage_response_delay_queue[i].current_pred;
+      }
+      for(uns k = 0; k < FFP_HASH_PC_BITS; k++){ 
+        res = res ^ (current & 0x01);
+        current = current >> 1;
+      }
+    }
+    else if (SND_TAG_NO_PRED == 4) {
+      res = res ^ future_tage_response_delay_queue[i].current_pred;
+      if(FFP_HASH_PC_BITS == 0){
+        res = res ^ current ^ (current >> 2);
+        res = res & 0x03;
+      }
+      else if(FFP_HASH_PC_BITS == 1){
+        res = res ^ (current >> 1) ^ (current >> 3);
+        res = res & 0x03;
+      }
+      else if(FFP_HASH_PC_BITS == 2){
+        res = res ^ (current >> 2) ^ (current >> 4);
+        res = res & 0x03;
+      }
+      else{
+        assert(false);
+      }
+      if(res & 0x02){
+        res = (res << 1) + 1;
+      }
+      else{
+        res = res << 1;
+      }
+      res = res & 0x03;
+    }
+    else if(SND_TAG_NO_PRED == 8){
+      res = res ^ future_tage_response_delay_queue[i].current_pred;
+      if(FFP_HASH_DIR_ONLY){
+        assert(AHEAD_DISTANCE == 3);  
+      }
+      else if(FFP_HASH_PC_BITS == 0){
+        res = res ^ current ^ (current >> 3);
+      }
+      else if(FFP_HASH_PC_BITS == 1){
+        res = res ^ current;
+      }
+      else if(FFP_HASH_PC_BITS == 2){
+        res = res ^ (current >> 1);
+      }
+      else if(FFP_HASH_PC_BITS == 3){
+        res = res ^ (current >> 2);
+      }
+      else if(FFP_HASH_PC_BITS == 4){
+        res = res ^ (current >> 3);
+      }
+      else if(FFP_HASH_PC_BITS == 5){
+        res = res ^ (current >> 1) ^ (current >> 4);
+      }
+      else if(FFP_HASH_PC_BITS == 6){
+        res = res ^ (current >> 2) ^ (current >> 5);
+      }
+      else{
+        assert(false);
+      }
+      if(res & 0x04){
+        res = (res << 1) + 1;
+      }
+      else{
+        res = res << 1;
+      }
+      res = res & 0x07;
+    }
+    else if(SND_TAG_NO_PRED == 16){
+      res = res ^ future_tage_response_delay_queue[i].current_pred;
+      if(FFP_HASH_DIR_ONLY){
+        assert(AHEAD_DISTANCE == 4);  
+      }
+      else if(FFP_HASH_PC_BITS == 0){
+        res = res ^ current ^ (current >> 4);
+      }
+      else if(FFP_HASH_PC_BITS == 1){
+        res = res ^ (current >> 1) ^ (current >> 5);
+      }
+      else if(FFP_HASH_PC_BITS == 2){
+        res = res ^ (current >> 2) ^ (current >> 6);
+      }
+      else{
+        assert(false);
+      }
+      if(res & 0x08){
+        res = (res << 1) + 1;
+      }
+      else{
+        res = res << 1;
+      }
+      res = res & 0x0f;
+    }
+    else if(SND_TAG_NO_PRED == 32){
+      res = res ^ future_tage_response_delay_queue[i].current_pred;
+      if(FFP_HASH_DIR_ONLY){
+        assert(AHEAD_DISTANCE == 5);  
+      }
+      else if(FFP_HASH_PC_BITS == 0){
+        res = res ^ current ^ (current >> 5);
+      }
+      else if(FFP_HASH_PC_BITS == 1){
+        res = res ^ (current >> 1) ^ (current >> 6);
+      }
+      else if(FFP_HASH_PC_BITS == 2){
+        res = res ^ (current >> 2) ^ (current >> 7);
+      }
+      else{
+        assert(false);
+      }
+      if(res & 0x10){
+        res = (res << 1) + 1;
+      }
+      else{
+        res = res << 1;
+      }
+      res = res & 0x01f;
+    }
+    else if(SND_TAG_NO_PRED == 64){
+      res = res ^ future_tage_response_delay_queue[i].current_pred;
+      if(FFP_HASH_DIR_ONLY){
+        assert(AHEAD_DISTANCE == 6);  
+      }
+      else if(FFP_HASH_PC_BITS == 1){
+        res = res ^ (current >> 1) ^ (current >> 7);
+      }
+      else{
+        assert(false);
+      }
+      if(res & 0x20){
+        res = (res << 1) + 1;
+      }
+      else{
+        res = res << 1;
+      }
+      res = res & 0x03f;
+    }
+    else if(SND_TAG_NO_PRED == 128){
+      res = res ^ future_tage_response_delay_queue[i].current_pred;
+      if(FFP_HASH_DIR_ONLY){
+        assert(AHEAD_DISTANCE == 7);  
+      }
+      else if(FFP_HASH_PC_BITS == 1){
+        res = res ^ (current >> 1) ^ (current >> 8);
+      }
+      else{
+        assert(false);
+      }
+      if(res & 0x40){
+        res = (res << 1) + 1;
+      }
+      else{
+        res = res << 1;
+      }
+      res = res & 0x07f;
+    }
+    else if(SND_TAG_NO_PRED == 256){
+      res = res ^ future_tage_response_delay_queue[i].current_pred;
+      if(FFP_HASH_DIR_ONLY){
+        assert(AHEAD_DISTANCE == 8);  
+      }
+      else if(FFP_HASH_PC_BITS == 1){
+        res = res ^ (current >> 1) ^ (current >> 9);
+      }
+      else{
+        assert(false);
+      }
+      if(res & 0x80){
+        res = (res << 1) + 1;
+      }
+      else{
+        res = res << 1;
+      }
+      res = res & 0x0ff;
+    }
+    else if(SND_TAG_NO_PRED == 512){
+      res = res ^ future_tage_response_delay_queue[i].current_pred;
+      if(FFP_HASH_DIR_ONLY){
+        assert(AHEAD_DISTANCE == 9);  
+      }
+      else if(FFP_HASH_PC_BITS == 1){
+        res = res ^ (current >> 1) ^ (current >> 10);
+      }
+      else{
+        assert(false);
+      }
+      if(res & 0x100){
+        res = (res << 1) + 1;
+      }
+      else{
+        res = res << 1;
+      }
+      res = res & 0x1ff;
+    }
+    else if(SND_TAG_NO_PRED == 1024){
+      res = res ^ future_tage_response_delay_queue[i].current_pred;
+      if(FFP_HASH_DIR_ONLY){
+        assert(AHEAD_DISTANCE == 10);  
+      }
+      else if(FFP_HASH_PC_BITS == 1){
+        res = res ^ (current >> 1) ^ (current >> 11);
+      }
+      else{
+        assert(false);
+      }
+      if(res & 0x200){
+        res = (res << 1) + 1;
+      }
+      else{
+        res = res << 1;
+      }
+      res = res & 0x3ff;
+    }
+    else if(SND_TAG_NO_PRED == 2048){
+      res = res ^ future_tage_response_delay_queue[i].current_pred;
+      if(FFP_HASH_DIR_ONLY){
+        assert(AHEAD_DISTANCE == 11);  
+      }
+      else if(FFP_HASH_PC_BITS == 1){
+        res = res ^ (current >> 1) ^ (current >> 12);
+      }
+      else{
+        assert(false);
+      }
+      if(res & 0x400){
+        res = (res << 1) + 1;
+      }
+      else{
+        res = res << 1;
+      }
+      res = res & 0x7ff;
+    }
+    else if(SND_TAG_NO_PRED == 4096){
+      res = res ^ future_tage_response_delay_queue[i].current_pred;
+      if(FFP_HASH_DIR_ONLY){
+        assert(AHEAD_DISTANCE == 12);  
+      }
+      else if(FFP_HASH_PC_BITS == 1){
+        res = res ^ (current >> 1) ^ (current >> 13);
+      }
+      else{
+        assert(false);
+      }
+      if(res & 0x800){
+        res = (res << 1) + 1;
+      }
+      else{
+        res = res << 1;
+      }
+      res = res & 0xfff;
+    }
+    else{
+      assert(false);
+    }
+  }
+  //std::cout << "Calculated missing history hash for branch pc " << br_pc << " is " << res << std::endl;
+  return res;
+}
 
 template <class CONFIG>
 bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc, uint64_t current_cycle) {
