@@ -266,23 +266,4 @@ for bench_name in "${BENCHMARKS[@]}"; do
 
 done
 
-# ── Overall weighted summary ────────────────────────────────────────────────
-echo ""
-
-if (( $(echo "$overall_total_weight > 0" | bc -l) )); then
-    overall_acc=$(echo "$overall_weighted_acc / $overall_total_weight" | bc -l)
-    overall_mpki=$(echo "$overall_weighted_mpki / $overall_total_weight" | bc -l)
-    overall_ipc=$(echo "$overall_weighted_ipc / $overall_total_weight" | bc -l)
-
-    echo "########################################"
-    echo "####### OVERALL WEIGHTED SUMMARY #######"
-    echo "########################################"
-    printf "Overall Weighted Accuracy: %.4f %%\n" "$overall_acc"
-    printf "Overall Weighted MPKI:     %.4f\n"      "$overall_mpki"
-    printf "Overall Weighted IPC:      %.4f\n"      "$overall_ipc"
-    echo "########################################"
-else
-    echo "No valid data collected across any benchmark."
-fi
-
 echo "All done."
