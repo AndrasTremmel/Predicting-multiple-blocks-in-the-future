@@ -1,7 +1,6 @@
 /*
  * Extended Baseline BTB with branch-only diagnostic statistics.
- * Non-branch instructions are filtered via a FIFO prediction queue.
- * Statistics are printed via static destructor at program exit.
+ * Statistics printed from a global object's destructor.
  */
 
 #include <algorithm>
@@ -10,6 +9,8 @@
 #include <map>
 #include <iostream>
 #include <iomanip>
+#include <fstream>
+#include <cstdlib>
 
 #include "msl/lru_table.h"
 #include "ooo_cpu.h"
@@ -38,26 +39,22 @@ struct btb_entry_t {
   auto tag() const { return ip_tag >> 2; }
 };
 
-// ---- FIFO queue to filter out non-branch instructions ----
 struct pending_btb_pred_t {
   uint64_t ip;
   uint64_t target;
   branch_info type;
   bool was_hit;
-  bool ras_empty; // meaningful only when type==RETURN
+  bool ras_empty;
 };
 
 struct btb_stats_t {
   uint64_t total_updates = 0;
   uint64_t taken_count = 0;
   uint64_t not_taken_count = 0;
-
   uint64_t total_hits = 0;
   uint64_t total_misses = 0;
-
   uint64_t target_correct = 0;
   uint64_t target_wrong = 0;
-
   uint64_t conditional_hits = 0;
   uint64_t conditional_misses = 0;
   uint64_t indirect_hits = 0;
@@ -66,81 +63,99 @@ struct btb_stats_t {
   uint64_t return_misses = 0;
   uint64_t always_taken_hits = 0;
   uint64_t always_taken_misses = 0;
-
   uint64_t ras_hits = 0;
   uint64_t ras_misses = 0;
   uint64_t ras_target_correct = 0;
   uint64_t ras_target_wrong = 0;
-
   uint64_t indirect_target_correct = 0;
   uint64_t indirect_target_wrong = 0;
   uint64_t btb_target_correct = 0;
   uint64_t btb_target_wrong = 0;
 };
 
-std::map<O3_CPU*, champsim::msl::lru_table<btb_entry_t>> BTB;
-std::map<O3_CPU*, std::array<uint64_t, BTB_INDIRECT_SIZE>> INDIRECT_BTB;
-std::map<O3_CPU*, std::bitset<champsim::lg2(BTB_INDIRECT_SIZE)>> CONDITIONAL_HISTORY;
-std::map<O3_CPU*, std::deque<uint64_t>> RAS;
-std::map<O3_CPU*, std::array<uint64_t, CALL_SIZE_TRACKERS>> CALL_SIZE;
+class BaselineBTBContext {
+ public:
+  std::map<O3_CPU*, champsim::msl::lru_table<btb_entry_t>> BTB;
+  std::map<O3_CPU*, std::array<uint64_t, BTB_INDIRECT_SIZE>> INDIRECT_BTB;
+  std::map<O3_CPU*, std::bitset<champsim::lg2(BTB_INDIRECT_SIZE)>> CONDITIONAL_HISTORY;
+  std::map<O3_CPU*, std::deque<uint64_t>> RAS;
+  std::map<O3_CPU*, std::array<uint64_t, CALL_SIZE_TRACKERS>> CALL_SIZE;
+  std::map<O3_CPU*, std::deque<pending_btb_pred_t>> PRED_QUEUE;
+  std::map<O3_CPU*, btb_stats_t> STATS;
 
-std::map<O3_CPU*, std::deque<pending_btb_pred_t>> BTB_PRED_QUEUE;
-std::map<O3_CPU*, btb_stats_t> BTB_STATS;
+  ~BaselineBTBContext() {
+    print_all();
+  }
 
-// ---- Static printer that runs at program exit ----
-struct BaselineBTBStatsPrinter {
-  ~BaselineBTBStatsPrinter() {
-    for (auto& [cpu, stats] : BTB_STATS) {
-      (void)cpu; // unused in print
-      std::cout << "\n========== BASELINE BTB STATISTICS ==========\n";
-      std::cout << "Branch updates:           " << stats.total_updates << "\n";
-      std::cout << "Total hits:               " << stats.total_hits << "\n";
-      std::cout << "Total misses:             " << stats.total_misses << "\n";
-      if ((stats.total_hits + stats.total_misses) > 0)
-        std::cout << "Hit rate:                 " << std::fixed << std::setprecision(4)
-                  << (100.0 * stats.total_hits / (stats.total_hits + stats.total_misses)) << "%\n";
-      std::cout << "Target correct:           " << stats.target_correct << "\n";
-      std::cout << "Target wrong:             " << stats.target_wrong << "\n";
-      if ((stats.target_correct + stats.target_wrong) > 0)
-        std::cout << "Target accuracy:          " << std::fixed << std::setprecision(4)
-                  << (100.0 * stats.target_correct / (stats.target_correct + stats.target_wrong)) << "%\n";
-      std::cout << "Conditional hits:         " << stats.conditional_hits << "\n";
-      std::cout << "Conditional misses:       " << stats.conditional_misses << "\n";
-      std::cout << "Indirect hits:            " << stats.indirect_hits << "\n";
-      std::cout << "Indirect misses:          " << stats.indirect_misses << "\n";
-      std::cout << "Return hits:              " << stats.return_hits << "\n";
-      std::cout << "Return misses:            " << stats.return_misses << "\n";
-      std::cout << "Always taken hits:        " << stats.always_taken_hits << "\n";
-      std::cout << "Always taken misses:      " << stats.always_taken_misses << "\n";
-      std::cout << "RAS hits:                 " << stats.ras_hits << "\n";
-      std::cout << "RAS misses:               " << stats.ras_misses << "\n";
-      std::cout << "RAS target correct:       " << stats.ras_target_correct << "\n";
-      std::cout << "RAS target wrong:         " << stats.ras_target_wrong << "\n";
-      std::cout << "Indirect target correct:  " << stats.indirect_target_correct << "\n";
-      std::cout << "Indirect target wrong:    " << stats.indirect_target_wrong << "\n";
-      std::cout << "BTB target correct:       " << stats.btb_target_correct << "\n";
-      std::cout << "BTB target wrong:         " << stats.btb_target_wrong << "\n";
-      std::cout << "=============================================\n";
+  void print_all() {
+    std::ofstream file("baseline_btb_stats.txt", std::ios::app);
+    auto out = [&](const std::string& s) {
+      std::cerr << s;
+      if (file.is_open()) file << s;
+    };
+
+    for (auto& [cpu, stats] : STATS) {
+      (void)cpu;
+      out("\n========== BASELINE BTB STATISTICS ==========\n");
+      out("Branch updates:           " + std::to_string(stats.total_updates) + "\n");
+      out("Total hits:               " + std::to_string(stats.total_hits) + "\n");
+      out("Total misses:             " + std::to_string(stats.total_misses) + "\n");
+      if ((stats.total_hits + stats.total_misses) > 0) {
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(4)
+            << (100.0 * stats.total_hits / (stats.total_hits + stats.total_misses));
+        out("Hit rate:                 " + oss.str() + "%\n");
+      }
+      out("Target correct:           " + std::to_string(stats.target_correct) + "\n");
+      out("Target wrong:             " + std::to_string(stats.target_wrong) + "\n");
+      if ((stats.target_correct + stats.target_wrong) > 0) {
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(4)
+            << (100.0 * stats.target_correct / (stats.target_correct + stats.target_wrong));
+        out("Target accuracy:          " + oss.str() + "%\n");
+      }
+      out("Conditional hits:         " + std::to_string(stats.conditional_hits) + "\n");
+      out("Conditional misses:       " + std::to_string(stats.conditional_misses) + "\n");
+      out("Indirect hits:            " + std::to_string(stats.indirect_hits) + "\n");
+      out("Indirect misses:          " + std::to_string(stats.indirect_misses) + "\n");
+      out("Return hits:              " + std::to_string(stats.return_hits) + "\n");
+      out("Return misses:            " + std::to_string(stats.return_misses) + "\n");
+      out("Always taken hits:        " + std::to_string(stats.always_taken_hits) + "\n");
+      out("Always taken misses:      " + std::to_string(stats.always_taken_misses) + "\n");
+      out("RAS hits:                 " + std::to_string(stats.ras_hits) + "\n");
+      out("RAS misses:               " + std::to_string(stats.ras_misses) + "\n");
+      out("RAS target correct:       " + std::to_string(stats.ras_target_correct) + "\n");
+      out("RAS target wrong:         " + std::to_string(stats.ras_target_wrong) + "\n");
+      out("Indirect target correct:  " + std::to_string(stats.indirect_target_correct) + "\n");
+      out("Indirect target wrong:    " + std::to_string(stats.indirect_target_wrong) + "\n");
+      out("BTB target correct:       " + std::to_string(stats.btb_target_correct) + "\n");
+      out("BTB target wrong:         " + std::to_string(stats.btb_target_wrong) + "\n");
+      out("=============================================\n");
     }
+
+    std::cerr << std::flush;
+    if (file.is_open()) file.close();
   }
 };
-static BaselineBTBStatsPrinter baseline_btb_printer;
+
+// Global singleton - destructor runs at program exit
+static BaselineBTBContext g_ctx;
 
 } // namespace
 
 void O3_CPU::initialize_btb()
 {
-  ::BTB.insert({this, champsim::msl::lru_table<btb_entry_t>{BTB_SET, BTB_WAY}});
-  std::fill(std::begin(::INDIRECT_BTB[this]), std::end(::INDIRECT_BTB[this]), 0);
-  std::fill(std::begin(::CALL_SIZE[this]), std::end(::CALL_SIZE[this]), 4);
-  ::CONDITIONAL_HISTORY[this] = 0;
-  ::BTB_PRED_QUEUE[this].clear();
-  ::BTB_STATS[this] = {};
+  g_ctx.BTB.insert({this, champsim::msl::lru_table<btb_entry_t>{BTB_SET, BTB_WAY}});
+  std::fill(std::begin(g_ctx.INDIRECT_BTB[this]), std::end(g_ctx.INDIRECT_BTB[this]), 0);
+  std::fill(std::begin(g_ctx.CALL_SIZE[this]), std::end(g_ctx.CALL_SIZE[this]), 4);
+  g_ctx.CONDITIONAL_HISTORY[this] = 0;
+  g_ctx.PRED_QUEUE[this].clear();
+  g_ctx.STATS[this] = {};
 }
 
 std::pair<uint64_t, uint8_t> O3_CPU::btb_prediction(uint64_t ip)
 {
-  auto btb_entry = ::BTB.at(this).check_hit({ip, 0, ::branch_info::ALWAYS_TAKEN});
+  auto btb_entry = g_ctx.BTB.at(this).check_hit({ip, 0, ::branch_info::ALWAYS_TAKEN});
 
   uint64_t predicted_target = 0;
   uint8_t always_taken = false;
@@ -153,21 +168,21 @@ std::pair<uint64_t, uint8_t> O3_CPU::btb_prediction(uint64_t ip)
     pred_type = btb_entry->type;
 
     if (btb_entry->type == ::branch_info::RETURN) {
-      if (std::empty(::RAS[this])) {
+      if (std::empty(g_ctx.RAS[this])) {
         ras_empty = true;
         predicted_target = 0;
         always_taken = true;
       } else {
         ras_empty = false;
-        auto target = ::RAS[this].back();
-        auto size = ::CALL_SIZE[this][target % std::size(::CALL_SIZE[this])];
+        auto target = g_ctx.RAS[this].back();
+        auto size = g_ctx.CALL_SIZE[this][target % std::size(g_ctx.CALL_SIZE[this])];
         predicted_target = target + size;
         always_taken = true;
       }
     }
     else if (btb_entry->type == ::branch_info::INDIRECT) {
-      auto hash = (ip >> 2) ^ ::CONDITIONAL_HISTORY[this].to_ullong();
-      predicted_target = ::INDIRECT_BTB[this][hash % std::size(::INDIRECT_BTB[this])];
+      auto hash = (ip >> 2) ^ g_ctx.CONDITIONAL_HISTORY[this].to_ullong();
+      predicted_target = g_ctx.INDIRECT_BTB[this][hash % std::size(g_ctx.INDIRECT_BTB[this])];
       always_taken = true;
     }
     else {
@@ -176,18 +191,17 @@ std::pair<uint64_t, uint8_t> O3_CPU::btb_prediction(uint64_t ip)
     }
   }
 
-  ::BTB_PRED_QUEUE[this].push_back({ip, predicted_target, pred_type, was_hit, ras_empty});
+  g_ctx.PRED_QUEUE[this].push_back({ip, predicted_target, pred_type, was_hit, ras_empty});
   return {predicted_target, always_taken};
 }
 
 void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint8_t branch_type)
 {
-  auto& stats = ::BTB_STATS[this];
+  auto& stats = g_ctx.STATS[this];
   stats.total_updates++;
   if (taken) stats.taken_count++; else stats.not_taken_count++;
 
-  // ---- Drain queue until we find the matching branch IP ----
-  auto& q = ::BTB_PRED_QUEUE[this];
+  auto& q = g_ctx.PRED_QUEUE[this];
   bool found = false;
   pending_btb_pred_t pred;
   while (!q.empty()) {
@@ -197,7 +211,6 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
       found = true;
       break;
     }
-    // Non-branch instructions are silently discarded here
   }
 
   if (found) {
@@ -245,7 +258,6 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
       }
     }
   } else {
-    // No pending prediction found for this branch
     stats.total_misses++;
     switch (branch_type) {
       case BRANCH_CONDITIONAL:
@@ -257,33 +269,31 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
     }
   }
 
-  // ---- RAS / indirect maintenance ----
   if (branch_type == BRANCH_DIRECT_CALL || branch_type == BRANCH_INDIRECT_CALL) {
-    RAS[this].push_back(ip);
-    if (std::size(RAS[this]) > RAS_SIZE)
-      RAS[this].pop_front();
+    g_ctx.RAS[this].push_back(ip);
+    if (std::size(g_ctx.RAS[this]) > RAS_SIZE)
+      g_ctx.RAS[this].pop_front();
   }
 
   if ((branch_type == BRANCH_INDIRECT) || (branch_type == BRANCH_INDIRECT_CALL)) {
-    auto hash = (ip >> 2) ^ ::CONDITIONAL_HISTORY[this].to_ullong();
-    ::INDIRECT_BTB[this][hash % std::size(::INDIRECT_BTB[this])] = branch_target;
+    auto hash = (ip >> 2) ^ g_ctx.CONDITIONAL_HISTORY[this].to_ullong();
+    g_ctx.INDIRECT_BTB[this][hash % std::size(g_ctx.INDIRECT_BTB[this])] = branch_target;
   }
 
   if ((branch_type == BRANCH_CONDITIONAL) || (branch_type == BRANCH_OTHER)) {
-    ::CONDITIONAL_HISTORY[this] <<= 1;
-    ::CONDITIONAL_HISTORY[this].set(0, taken);
+    g_ctx.CONDITIONAL_HISTORY[this] <<= 1;
+    g_ctx.CONDITIONAL_HISTORY[this].set(0, taken);
   }
 
-  if (branch_type == BRANCH_RETURN && !std::empty(::RAS[this])) {
-    auto call_ip = ::RAS[this].back();
-    ::RAS[this].pop_back();
+  if (branch_type == BRANCH_RETURN && !std::empty(g_ctx.RAS[this])) {
+    auto call_ip = g_ctx.RAS[this].back();
+    g_ctx.RAS[this].pop_back();
     auto estimated_call_instr_size = (call_ip > branch_target) ? call_ip - branch_target : branch_target - call_ip;
     if (estimated_call_instr_size <= 10) {
-      ::CALL_SIZE[this][call_ip % std::size(::CALL_SIZE[this])] = estimated_call_instr_size;
+      g_ctx.CALL_SIZE[this][call_ip % std::size(g_ctx.CALL_SIZE[this])] = estimated_call_instr_size;
     }
   }
 
-  // ---- Update BTB entry ----
   auto type = ::branch_info::ALWAYS_TAKEN;
   if ((branch_type == BRANCH_INDIRECT) || (branch_type == BRANCH_INDIRECT_CALL))
     type = ::branch_info::INDIRECT;
@@ -292,7 +302,7 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
   else if ((branch_type == BRANCH_CONDITIONAL) || (branch_type == BRANCH_OTHER))
     type = ::branch_info::CONDITIONAL;
 
-  auto opt_entry = ::BTB.at(this).check_hit({ip, branch_target, type});
+  auto opt_entry = g_ctx.BTB.at(this).check_hit({ip, branch_target, type});
   if (opt_entry.has_value()) {
     opt_entry->type = type;
     if (branch_target != 0)
@@ -300,6 +310,6 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
   }
 
   if (branch_target != 0) {
-    ::BTB.at(this).fill(opt_entry.value_or(::btb_entry_t{ip, branch_target, type}));
+    g_ctx.BTB.at(this).fill(opt_entry.value_or(::btb_entry_t{ip, branch_target, type}));
   }
 }

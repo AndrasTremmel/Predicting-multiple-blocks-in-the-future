@@ -200,6 +200,9 @@ struct TageStats {
         std::cout << "  Bank " << i << ": " << bank_hits[i] << "\n";
     }
     std::cout << "=============================================\n";
+    // Inside TageStats::print(), after the last line:
+    std::cout << "=============================================\n";
+    std::cout << std::flush;  // <-- ADD THIS
   }
 };
 

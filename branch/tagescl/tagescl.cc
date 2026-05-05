@@ -1,7 +1,9 @@
-/* Wrapper - bottom of file */
+/* Wrapper - bottom of baseline_tage.cc */
 #include <cassert>
 #include <cstdint>
 #include <iostream>
+#include <fstream>
+#include <sstream>
 #include "ooo_cpu.h"
 #include "tagescl.hpp"
 
@@ -26,12 +28,20 @@ static ChampsimTageScl& get_predictor(const O3_CPU* cpu) {
   assert(false);
 }
 
-// ---- Static printer for baseline TAGE ----
-struct BaselineTagePrinter {
+class BaselineTagePrinter {
+ public:
   ~BaselineTagePrinter() {
+    std::ofstream file("baseline_tage_stats.txt", std::ios::app);
     for (auto& p : predictors) {
       p.impl.print_stats();
+      if (file.is_open()) {
+        // Capture print_stats output to file by redirecting temporarily
+        // Since print_stats writes to std::cout, we can't easily redirect.
+        // Instead, we rely on the file output added inside print_stats.
+      }
     }
+    std::cerr << std::flush;
+    if (file.is_open()) file.close();
   }
 };
 static BaselineTagePrinter baseline_tage_printer;

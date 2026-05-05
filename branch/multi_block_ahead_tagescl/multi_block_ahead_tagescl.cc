@@ -1,7 +1,9 @@
-/* Wrapper - bottom of file */
+/* Wrapper - bottom of multi_block_ahead_tagescl.cc */
 #include <cassert>
 #include <cstdint>
 #include <iostream>
+#include <fstream>
+#include <sstream>
 #include "ooo_cpu.h"
 #include "tagescl.hpp"
 
@@ -26,12 +28,15 @@ static ChampsimTageScl& get_predictor(const O3_CPU* cpu) {
   assert(false);
 }
 
-// ---- Static printer for multi-block TAGE ----
-struct MultiBlockTagePrinter {
+class MultiBlockTagePrinter {
+ public:
   ~MultiBlockTagePrinter() {
+    std::ofstream file("multi_block_tage_stats.txt", std::ios::app);
     for (auto& p : predictors) {
       p.impl.print_stats();
     }
+    std::cerr << std::flush;
+    if (file.is_open()) file.close();
   }
 };
 static MultiBlockTagePrinter multi_block_tage_printer;
