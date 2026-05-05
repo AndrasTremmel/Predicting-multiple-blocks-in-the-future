@@ -145,6 +145,124 @@ void do_stack_pointer_folding(ooo_model_instr& arch_instr)
 }
 } // namespace
 
+bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
+{
+  bool stop_fetch = false;
+
+  // ---- detect block boundary (taken branch or cache-line change) ----
+  uint64_t curr_cl = arch_instr.ip >> LOG2_BLOCK_SIZE;
+  bool new_block = !prev_block_valid ||
+                   last_instr_was_taken_branch ||
+                   (curr_cl != current_block_start);
+
+  if (new_block) {
+    // Commit the BTB update for the block that just ended
+    if (pending_btb_valid) {
+      last_fetched_branch_ip = pending_btb_branch_ip;
+      impl_update_btb(pending_btb_key, pending_btb_target,
+                      pending_btb_taken, pending_btb_type);
+      pending_btb_valid = false;
+    }
+
+    // Advance the two-block-ahead pointer: Aa becomes prev_block_end_ip
+    prev_block_end_ip      = last_block_end_ip;
+    prev_block_transition  = last_block_taken ? 1 : 0;
+    if (last_block_branch_type == BRANCH_DIRECT_CALL ||
+        last_block_branch_type == BRANCH_INDIRECT_CALL)
+      prev_block_transition = 2;                 // R-transition
+
+    prev_block_valid       = true;
+    current_block_start    = curr_cl;
+
+    // ---- Two-block-ahead BTB lookup (performed ONCE per block) ----
+    uint64_t pred_ip = (prev_block_valid && prev_block_end_ip != 0)
+                           ? prev_block_end_ip
+                           : arch_instr.ip;
+
+    auto [predicted_branch_target, always_taken] = impl_btb_prediction(pred_ip);
+    curr_block_pred_target       = predicted_branch_target;
+    curr_block_pred_always_taken = always_taken;
+  }
+
+  // ---- TAGE wrapper: called for EVERY instruction ----
+  // We must keep the wrapper's in-flight branch ID bookkeeping
+  // consistent (one ID per instruction).  The actual table index is
+  // the two-block-ahead key, identical for every instruction in this block.
+  uint64_t pred_ip = (prev_block_valid && prev_block_end_ip != 0)
+                         ? prev_block_end_ip
+                         : arch_instr.ip;
+
+  arch_instr.branch_prediction = impl_predict_branch(pred_ip) || curr_block_pred_always_taken;
+  uint64_t predicted_branch_target = curr_block_pred_target;
+  if (arch_instr.branch_prediction == 0)
+    predicted_branch_target = 0;
+
+  if (arch_instr.is_branch) {
+    if constexpr (champsim::debug_print) {
+      fmt::print("[BRANCH] instr_id: {} ip: {:#x} taken: {}\n",
+                 arch_instr.instr_id, arch_instr.ip, arch_instr.branch_taken);
+    }
+
+    // code prefetcher still sees the actual branch IP
+    l1i->impl_prefetcher_branch_operate(arch_instr.ip, arch_instr.branch_type,
+                                        predicted_branch_target);
+
+    // misprediction check
+    if (predicted_branch_target != arch_instr.branch_target
+        || (((arch_instr.branch_type == BRANCH_CONDITIONAL) ||
+             (arch_instr.branch_type == BRANCH_OTHER))
+            && arch_instr.branch_taken != arch_instr.branch_prediction)) {
+      sim_stats.total_rob_occupancy_at_branch_mispredict += std::size(ROB);
+      sim_stats.branch_type_misses[arch_instr.branch_type]++;
+      if (!warmup) {
+        fetch_resume_cycle = std::numeric_limits<uint64_t>::max();
+        stop_fetch = true;
+        arch_instr.branch_mispredicted = 1;
+      }
+    } else {
+      stop_fetch = arch_instr.branch_taken;
+    }
+
+    // TAGE history update uses the *real* branch IP (Bb), not the key
+    impl_last_branch_result(arch_instr.ip, arch_instr.branch_target,
+                            arch_instr.branch_taken, arch_instr.branch_type);
+
+    // Buffer the BTB update: key = Aa, value = this block's terminating branch
+    pending_btb_key       = prev_block_valid ? prev_block_end_ip : arch_instr.ip;
+    pending_btb_branch_ip = arch_instr.ip;   // real IP needed by RAS/indirect
+    pending_btb_target    = arch_instr.branch_target;
+    pending_btb_taken     = arch_instr.branch_taken;
+    pending_btb_type      = arch_instr.branch_type;
+    pending_btb_valid     = true;
+
+    // Book-keeping for next block boundary
+    last_block_end_ip      = arch_instr.ip;
+    last_block_taken       = arch_instr.branch_taken;
+    last_block_branch_type = arch_instr.branch_type;
+    last_instr_was_taken_branch = arch_instr.branch_taken;
+
+    if (arch_instr.branch_taken)
+      current_block_start = arch_instr.branch_target >> LOG2_BLOCK_SIZE;
+  } else {
+    last_instr_was_taken_branch = false;
+    last_block_end_ip = arch_instr.ip;
+  }
+
+  return stop_fetch;
+}
+
+bool O3_CPU::do_init_instruction(ooo_model_instr& arch_instr)
+{
+  if (warmup) {
+    arch_instr.source_registers.clear();
+    arch_instr.destination_registers.clear();
+  }
+
+  ::do_stack_pointer_folding(arch_instr);
+  return do_predict_branch(arch_instr);
+}
+
+
 // bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
 // {
 //   bool stop_fetch = false;
@@ -152,8 +270,8 @@ void do_stack_pointer_folding(ooo_model_instr& arch_instr)
 //   // handle branch prediction for all instructions as at this point we do not know if the instruction is a branch
 //   sim_stats.total_branch_types[arch_instr.branch_type]++;
 //   auto [predicted_branch_target, always_taken] = impl_btb_prediction(arch_instr.ip);
-//   auto predicted_branch_direction = impl_predict_branch(arch_instr.ip);
-//   if (predicted_branch_direction == 0)
+//   arch_instr.branch_prediction = impl_predict_branch(arch_instr.ip) || always_taken;
+//   if (arch_instr.branch_prediction == 0)
 //     predicted_branch_target = 0;
 
 //   if (arch_instr.is_branch) {
@@ -164,10 +282,7 @@ void do_stack_pointer_folding(ooo_model_instr& arch_instr)
 //     // call code prefetcher every time the branch predictor is used
 //     l1i->impl_prefetcher_branch_operate(arch_instr.ip, arch_instr.branch_type, predicted_branch_target);
 
-//     arch_instr.branch_prediction = previous_pred_taken || previous_pred_always_taken;
-
-
-//     if (previous_pred_target != arch_instr.branch_target
+//     if (predicted_branch_target != arch_instr.branch_target
 //         || (((arch_instr.branch_type == BRANCH_CONDITIONAL) || (arch_instr.branch_type == BRANCH_OTHER))
 //             && arch_instr.branch_taken != arch_instr.branch_prediction)) { // conditional branches are re-evaluated at decode when the target is computed
 //       sim_stats.total_rob_occupancy_at_branch_mispredict += std::size(ROB);
@@ -181,11 +296,6 @@ void do_stack_pointer_folding(ooo_model_instr& arch_instr)
 //       stop_fetch = arch_instr.branch_taken; // if correctly predicted taken, then we can't fetch anymore instructions this cycle
 //     }
 
-//     previous_pred_taken = predicted_branch_direction;
-//     previous_pred_target = predicted_branch_target;
-//     previous_pred_always_taken = always_taken;
-//     previous_pred_branch_ip = arch_instr.ip;
-
 //     impl_update_btb(arch_instr.ip, arch_instr.branch_target, arch_instr.branch_taken, arch_instr.branch_type);
 //     impl_last_branch_result(arch_instr.ip, arch_instr.branch_target, arch_instr.branch_taken, arch_instr.branch_type);
 //   }
@@ -193,58 +303,17 @@ void do_stack_pointer_folding(ooo_model_instr& arch_instr)
 //   return stop_fetch;
 // }
 
+// bool O3_CPU::do_init_instruction(ooo_model_instr& arch_instr)
+// {
+//   // fast warmup eliminates register dependencies between instructions branch predictor, cache contents, and prefetchers are still warmed up
+//   if (warmup) {
+//     arch_instr.source_registers.clear();
+//     arch_instr.destination_registers.clear();
+//   }
 
-bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
-{
-  bool stop_fetch = false;
-
-  // handle branch prediction for all instructions as at this point we do not know if the instruction is a branch
-  sim_stats.total_branch_types[arch_instr.branch_type]++;
-  auto [predicted_branch_target, always_taken] = impl_btb_prediction(arch_instr.ip);
-  arch_instr.branch_prediction = impl_predict_branch(arch_instr.ip) || always_taken;
-  if (arch_instr.branch_prediction == 0)
-    predicted_branch_target = 0;
-
-  if (arch_instr.is_branch) {
-    if constexpr (champsim::debug_print) {
-      fmt::print("[BRANCH] instr_id: {} ip: {:#x} taken: {}\n", arch_instr.instr_id, arch_instr.ip, arch_instr.branch_taken);
-    }
-
-    // call code prefetcher every time the branch predictor is used
-    l1i->impl_prefetcher_branch_operate(arch_instr.ip, arch_instr.branch_type, predicted_branch_target);
-
-    if (predicted_branch_target != arch_instr.branch_target
-        || (((arch_instr.branch_type == BRANCH_CONDITIONAL) || (arch_instr.branch_type == BRANCH_OTHER))
-            && arch_instr.branch_taken != arch_instr.branch_prediction)) { // conditional branches are re-evaluated at decode when the target is computed
-      sim_stats.total_rob_occupancy_at_branch_mispredict += std::size(ROB);
-      sim_stats.branch_type_misses[arch_instr.branch_type]++;
-      if (!warmup) {
-        fetch_resume_cycle = std::numeric_limits<uint64_t>::max();
-        stop_fetch = true;
-        arch_instr.branch_mispredicted = 1;
-      }
-    } else {
-      stop_fetch = arch_instr.branch_taken; // if correctly predicted taken, then we can't fetch anymore instructions this cycle
-    }
-
-    impl_update_btb(arch_instr.ip, arch_instr.branch_target, arch_instr.branch_taken, arch_instr.branch_type);
-    impl_last_branch_result(arch_instr.ip, arch_instr.branch_target, arch_instr.branch_taken, arch_instr.branch_type);
-  }
-
-  return stop_fetch;
-}
-
-bool O3_CPU::do_init_instruction(ooo_model_instr& arch_instr)
-{
-  // fast warmup eliminates register dependencies between instructions branch predictor, cache contents, and prefetchers are still warmed up
-  if (warmup) {
-    arch_instr.source_registers.clear();
-    arch_instr.destination_registers.clear();
-  }
-
-  ::do_stack_pointer_folding(arch_instr);
-  return do_predict_branch(arch_instr);
-}
+//   ::do_stack_pointer_folding(arch_instr);
+//   return do_predict_branch(arch_instr);
+// }
 
 long O3_CPU::check_dib()
 {

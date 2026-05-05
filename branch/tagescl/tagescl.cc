@@ -37,13 +37,11 @@ void O3_CPU::initialize_branch_predictor() {
   predictors.emplace_back(1);
 }
 
-std::uint8_t O3_CPU::predict_branch(std::uint64_t ip) {
+std::uint8_t O3_CPU::predict_branch(std::uint64_t ip)
+{
   ChampsimTageScl& predictor = get_predictor(this);
   if (predictor.state == ChampsimTageScl::PREDICTED) {
-    // If we get here is because last_branch_result was not called.
-    // Hence, the last ip was not branch and we should retire it
-    // without doing any operation such as updating the history.
-    // predictor.impl.retire_non_branch_ip(predictor.id);
+    // Previous instruction was not a branch -> retire it as non-branch.
     tagescl::Branch_Type type;
     type.is_conditional = false;
     type.is_indirect = false;
@@ -52,22 +50,30 @@ std::uint8_t O3_CPU::predict_branch(std::uint64_t ip) {
   }
   predictor.id = predictor.impl.get_new_branch_id();
   bool prediction = predictor.impl.get_prediction(predictor.id, ip);
-  predictor.last_ip = ip;
+  predictor.last_ip = ip;          // ip is the two-block-ahead key (Aa)
   predictor.state = ChampsimTageScl::PREDICTED;
   return prediction;
 }
 
-void O3_CPU::last_branch_result(std::uint64_t ip, std::uint64_t target,
-                                std::uint8_t taken, std::uint8_t branch_type) {
+void O3_CPU::last_branch_result(std::uint64_t ip, uint64_t target,
+                                std::uint8_t taken, uint8_t branch_type)
+{
   ChampsimTageScl& predictor = get_predictor(this);
   assert(predictor.state == ChampsimTageScl::PREDICTED);
-  assert(predictor.last_ip == ip);
+
+  // Two-block-ahead: predict_branch was called with the PREVIOUS block's
+  // end IP (Aa), but the branch that actually resolves is the CURRENT
+  // block's branch (Bb).  The predictor tables are therefore updated
+  // with the real branch IP, which is exactly what the paper describes.
+  // assert(predictor.last_ip == ip);  // <-- removed for two-block-ahead
+
   tagescl::Branch_Type type;
   type.is_conditional =
       branch_type == BRANCH_CONDITIONAL or branch_type == BRANCH_OTHER;
   type.is_indirect =
       branch_type == BRANCH_INDIRECT or branch_type == BRANCH_INDIRECT_CALL or
       branch_type == BRANCH_RETURN or branch_type == BRANCH_OTHER;
+
   predictor.impl.update_speculative_state(predictor.id, ip, type, taken,
                                           target);
   if (type.is_conditional) {

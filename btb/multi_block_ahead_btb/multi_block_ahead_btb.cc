@@ -1,21 +1,228 @@
-#include <cstdint>
-#include <map>
-#include <array>
+// #include <cstdint>
+// #include <map>
+// #include <array>
+// #include <bitset>
+// #include <deque>
+// #include <algorithm>
+// #include <utility>
+// #include <cstdlib>
+
+// #include "msl/lru_table.h"
+// #include "ooo_cpu.h"
+
+
+
+
+// namespace
+// {
+
+// enum class branch_info {
+//   INDIRECT,
+//   RETURN,
+//   ALWAYS_TAKEN,
+//   CONDITIONAL,
+// };
+
+// // ---- MBTB EXTENSION ----
+// enum class mbtb_transition : uint8_t {
+//   T,
+//   N,
+//   R
+// };
+
+// struct mbtb_entry_t {
+//   uint64_t ip_tag = 0;        // Aa (previous block branch)
+//   uint64_t target = 0;        // Ci (future block target)
+//   branch_info type = branch_info::ALWAYS_TAKEN;
+
+//   mbtb_transition transition = mbtb_transition::N;
+
+//   auto index() const { return ip_tag >> 2; }
+//   auto tag() const { return (ip_tag >> 2) ^ static_cast<uint64_t>(transition); }
+// };
+
+// // ---- STORAGE ----
+// constexpr std::size_t BTB_SET = 2048;
+// constexpr std::size_t BTB_WAY = 4;
+// constexpr std::size_t BTB_INDIRECT_SIZE = 4096;
+// constexpr std::size_t RAS_SIZE = 64;
+// constexpr std::size_t SAS_SIZE = 64;
+// constexpr std::size_t CALL_SIZE_TRACKERS = 1024;
+
+// // MBTB replaces BTB
+// std::map<O3_CPU*, champsim::msl::lru_table<mbtb_entry_t>> MBTB;
+
+// std::map<O3_CPU*, std::array<uint64_t, BTB_INDIRECT_SIZE>> INDIRECT_BTB;
+// std::map<O3_CPU*, std::bitset<champsim::lg2(BTB_INDIRECT_SIZE)>> CONDITIONAL_HISTORY;
+
+// std::map<O3_CPU*, std::deque<uint64_t>> RAS;
+// std::map<O3_CPU*, std::deque<uint64_t>> SAS;
+
+// std::map<O3_CPU*, std::array<uint64_t, CALL_SIZE_TRACKERS>> CALL_SIZE;
+
+// // ---- Track previous block branch (Aa) ----
+// std::map<O3_CPU*, uint64_t> LAST_BRANCH_IP;
+// std::map<O3_CPU*, mbtb_transition> LAST_TRANSITION;
+
+// } // namespace
+
+
+// void O3_CPU::initialize_btb()
+// {
+//   ::MBTB.insert({this, champsim::msl::lru_table<mbtb_entry_t>{BTB_SET, BTB_WAY}});
+
+//   std::fill(std::begin(::INDIRECT_BTB[this]), std::end(::INDIRECT_BTB[this]), 0);
+//   std::fill(std::begin(::CALL_SIZE[this]), std::end(::CALL_SIZE[this]), 4);
+
+//   ::CONDITIONAL_HISTORY[this] = 0;
+//   ::LAST_BRANCH_IP[this] = 0;
+//   ::LAST_TRANSITION[this] = mbtb_transition::N;
+// }
+
+
+// std::pair<uint64_t, uint8_t> O3_CPU::btb_prediction(uint64_t ip)
+// {
+//   auto prev_ip = ::LAST_BRANCH_IP[this];
+//   auto trans   = ::LAST_TRANSITION[this];
+
+//   auto entry = ::MBTB.at(this).check_hit({prev_ip, 0, branch_info::ALWAYS_TAKEN, trans});
+
+//   if (!entry.has_value())
+//     return {0, false};
+
+//   // ---- RETURN handling via RAS ----
+//   if (entry->type == branch_info::RETURN) {
+//     if (std::empty(::RAS[this]))
+//       return {0, true};
+
+//     auto target = ::RAS[this].back();
+//     auto size = ::CALL_SIZE[this][target % std::size(::CALL_SIZE[this])];
+//     return {target + size, true};
+//   }
+
+//   // ---- INDIRECT ----
+//   if (entry->type == branch_info::INDIRECT) {
+//     auto hash = (ip >> 2) ^ ::CONDITIONAL_HISTORY[this].to_ullong();
+//     return {::INDIRECT_BTB[this][hash % std::size(::INDIRECT_BTB[this])], true};
+//   }
+
+//   return {entry->target, entry->type != branch_info::CONDITIONAL};
+// }
+
+
+
+
+// void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint8_t branch_type)
+// {
+//   // ---- CALL handling ----
+//   if (branch_type == BRANCH_DIRECT_CALL || branch_type == BRANCH_INDIRECT_CALL) {
+//     ::RAS[this].push_back(ip);
+//     ::SAS[this].push_back(ip);
+
+//     if (std::size(::RAS[this]) > RAS_SIZE)
+//       ::RAS[this].pop_front();
+
+//     if (std::size(::SAS[this]) > SAS_SIZE)
+//       ::SAS[this].pop_front();
+//   }
+
+//   // ---- RETURN ----
+//   if (branch_type == BRANCH_RETURN && !std::empty(::RAS[this])) {
+//     auto call_ip = ::RAS[this].back();
+//     ::RAS[this].pop_back();
+
+//     if (!std::empty(::SAS[this]))
+//       ::SAS[this].pop_back();
+
+//     auto estimated_size = std::abs((long)(call_ip - branch_target));
+//     if (estimated_size <= 10) {
+//       ::CALL_SIZE[this][call_ip % std::size(::CALL_SIZE[this])] = estimated_size;
+//     }
+//   }
+
+//   // ---- INDIRECT ----
+//   if ((branch_type == BRANCH_INDIRECT) || (branch_type == BRANCH_INDIRECT_CALL)) {
+//     auto hash = (ip >> 2) ^ ::CONDITIONAL_HISTORY[this].to_ullong();
+//     ::INDIRECT_BTB[this][hash % std::size(::INDIRECT_BTB[this])] = branch_target;
+//   }
+
+//   // ---- CONDITIONAL HISTORY ----
+//   if ((branch_type == BRANCH_CONDITIONAL) || (branch_type == BRANCH_OTHER)) {
+//     ::CONDITIONAL_HISTORY[this] <<= 1;
+//     ::CONDITIONAL_HISTORY[this].set(0, taken);
+//   }
+
+//   // ---- Determine type ----
+//   auto type = branch_info::ALWAYS_TAKEN;
+
+//   if ((branch_type == BRANCH_INDIRECT) || (branch_type == BRANCH_INDIRECT_CALL))
+//     type = branch_info::INDIRECT;
+//   else if (branch_type == BRANCH_RETURN)
+//     type = branch_info::RETURN;
+//   else if ((branch_type == BRANCH_CONDITIONAL) || (branch_type == BRANCH_OTHER))
+//     type = branch_info::CONDITIONAL;
+
+//   // ---- Transition ----
+//   mbtb_transition trans;
+
+//   // R: previous instruction is a CALL
+//   if (branch_type == BRANCH_DIRECT_CALL || branch_type == BRANCH_INDIRECT_CALL) {
+//     trans = mbtb_transition::R;
+//   }
+//   // T: taken branch that is NOT a call/return
+//   else if (taken &&
+//     branch_type != BRANCH_RETURN &&
+//     branch_type != BRANCH_DIRECT_CALL &&
+//     branch_type != BRANCH_INDIRECT_CALL) {
+//     trans = mbtb_transition::T;
+//   }
+//   // N: everything else (non-branch OR not-taken conditional)
+//   else {
+//     trans = mbtb_transition::N;
+//   }
+
+  
+//   // ---- Update MBTB using PREVIOUS branch ----
+//   auto prev_ip = ::LAST_BRANCH_IP[this];
+//   auto prev_trans = ::LAST_TRANSITION[this];
+
+//   auto opt_entry = ::MBTB.at(this).check_hit({prev_ip, branch_target, type, prev_trans});
+
+//   if (opt_entry.has_value()) {
+//     opt_entry->target = branch_target;
+//     opt_entry->type = type;
+//   }
+
+//   if (branch_target != 0) {
+//     ::MBTB.at(this).fill(
+//         opt_entry.value_or(mbtb_entry_t{prev_ip, branch_target, type, prev_trans})
+//     );
+//   }
+
+//   // ---- Update LAST (Aa tracking) ----
+//   ::LAST_BRANCH_IP[this] = ip;
+//   ::LAST_TRANSITION[this] = trans;
+// }
+
+
+
+/*
+ * Two-Block Ahead BTB
+ * Keys entries by the *previous* block's terminating branch IP +
+ * transition type (N/T/R).  Stores target & type of the *current*
+ * block's terminating branch.
+ */
+
+#include <algorithm>
 #include <bitset>
 #include <deque>
-#include <algorithm>
-#include <utility>
-#include <cstdlib>
+#include <map>
 
 #include "msl/lru_table.h"
 #include "ooo_cpu.h"
 
-
-
-
 namespace
 {
-
 enum class branch_info {
   INDIRECT,
   RETURN,
@@ -23,183 +230,141 @@ enum class branch_info {
   CONDITIONAL,
 };
 
-// ---- MBTB EXTENSION ----
-enum class mbtb_transition : uint8_t {
-  T,
-  N,
-  R
-};
-
-struct mbtb_entry_t {
-  uint64_t ip_tag = 0;        // Aa (previous block branch)
-  uint64_t target = 0;        // Ci (future block target)
-  branch_info type = branch_info::ALWAYS_TAKEN;
-
-  mbtb_transition transition = mbtb_transition::N;
-
-  auto index() const { return ip_tag >> 2; }
-  auto tag() const { return (ip_tag >> 2) ^ static_cast<uint64_t>(transition); }
-};
-
-// ---- STORAGE ----
 constexpr std::size_t BTB_SET = 2048;
 constexpr std::size_t BTB_WAY = 4;
 constexpr std::size_t BTB_INDIRECT_SIZE = 4096;
 constexpr std::size_t RAS_SIZE = 64;
-constexpr std::size_t SAS_SIZE = 64;
 constexpr std::size_t CALL_SIZE_TRACKERS = 1024;
 
-// MBTB replaces BTB
-std::map<O3_CPU*, champsim::msl::lru_table<mbtb_entry_t>> MBTB;
+struct btb_entry_t {
+  uint64_t ip_tag = 0;      // key = prev_branch_ip
+  uint64_t target = 0;      // target of NEXT block's branch
+  branch_info type = branch_info::ALWAYS_TAKEN;
+  uint8_t transition = 0;   // 0=N, 1=T, 2=R  (folded into tag/index)
 
+  auto index() const {
+    return ((ip_tag >> 2) ^ (static_cast<uint64_t>(transition) << 7))
+           & (BTB_SET - 1);
+  }
+  auto tag() const {
+    return (ip_tag >> 2) | (static_cast<uint64_t>(transition) << 48);
+  }
+};
+
+std::map<O3_CPU*, champsim::msl::lru_table<btb_entry_t>> BTB;
 std::map<O3_CPU*, std::array<uint64_t, BTB_INDIRECT_SIZE>> INDIRECT_BTB;
 std::map<O3_CPU*, std::bitset<champsim::lg2(BTB_INDIRECT_SIZE)>> CONDITIONAL_HISTORY;
-
 std::map<O3_CPU*, std::deque<uint64_t>> RAS;
-std::map<O3_CPU*, std::deque<uint64_t>> SAS;
-
 std::map<O3_CPU*, std::array<uint64_t, CALL_SIZE_TRACKERS>> CALL_SIZE;
-
-// ---- Track previous block branch (Aa) ----
-std::map<O3_CPU*, uint64_t> LAST_BRANCH_IP;
-std::map<O3_CPU*, mbtb_transition> LAST_TRANSITION;
-
 } // namespace
-
 
 void O3_CPU::initialize_btb()
 {
-  ::MBTB.insert({this, champsim::msl::lru_table<mbtb_entry_t>{BTB_SET, BTB_WAY}});
-
+  ::BTB.insert({this, champsim::msl::lru_table<btb_entry_t>{BTB_SET, BTB_WAY}});
   std::fill(std::begin(::INDIRECT_BTB[this]), std::end(::INDIRECT_BTB[this]), 0);
   std::fill(std::begin(::CALL_SIZE[this]), std::end(::CALL_SIZE[this]), 4);
-
   ::CONDITIONAL_HISTORY[this] = 0;
-  ::LAST_BRANCH_IP[this] = 0;
-  ::LAST_TRANSITION[this] = mbtb_transition::N;
 }
-
 
 std::pair<uint64_t, uint8_t> O3_CPU::btb_prediction(uint64_t ip)
 {
-  auto prev_ip = ::LAST_BRANCH_IP[this];
-  auto trans   = ::LAST_TRANSITION[this];
+  // ip = prev_block_branch_ip passed by the core
+  uint8_t trans = this->prev_block_transition; // 0=N, 1=T, 2=R
 
-  auto entry = ::MBTB.at(this).check_hit({prev_ip, 0, branch_info::ALWAYS_TAKEN, trans});
+  // Return handling: RAS gives the target of the return itself.
+  // The BTB entry for the return (keyed by return_ip, T) stores
+  // info about the branch *after* the return target.
+  if (trans == 2) { // R-transition (call) – should not be read directly,
+                    // but if it happens, treat as miss.
+    return {0, false};
+  }
 
-  if (!entry.has_value())
+  auto btb_entry = ::BTB.at(this).check_hit({ip, 0, branch_info::ALWAYS_TAKEN, trans});
+
+  if (!btb_entry.has_value())
     return {0, false};
 
-  // ---- RETURN handling via RAS ----
-  if (entry->type == branch_info::RETURN) {
+  if (btb_entry->type == ::branch_info::RETURN) {
     if (std::empty(::RAS[this]))
       return {0, true};
-
     auto target = ::RAS[this].back();
     auto size = ::CALL_SIZE[this][target % std::size(::CALL_SIZE[this])];
     return {target + size, true};
   }
 
-  // ---- INDIRECT ----
-  if (entry->type == branch_info::INDIRECT) {
+  if (btb_entry->type == ::branch_info::INDIRECT) {
     auto hash = (ip >> 2) ^ ::CONDITIONAL_HISTORY[this].to_ullong();
     return {::INDIRECT_BTB[this][hash % std::size(::INDIRECT_BTB[this])], true};
   }
 
-  return {entry->target, entry->type != branch_info::CONDITIONAL};
+  bool always_taken = (btb_entry->type != ::branch_info::CONDITIONAL);
+  return {btb_entry->target, always_taken};
 }
 
-
-
-
-void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint8_t branch_type)
+void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target,
+                        uint8_t taken, uint8_t branch_type)
 {
-  // ---- CALL handling ----
+  // ip = prev_block_branch_ip (key).  We store info about the
+  // current block's terminating branch (branch_target, branch_type).
+
+  // RAS push on calls
   if (branch_type == BRANCH_DIRECT_CALL || branch_type == BRANCH_INDIRECT_CALL) {
-    ::RAS[this].push_back(ip);
-    ::SAS[this].push_back(ip);
-
-    if (std::size(::RAS[this]) > RAS_SIZE)
-      ::RAS[this].pop_front();
-
-    if (std::size(::SAS[this]) > SAS_SIZE)
-      ::SAS[this].pop_front();
+    RAS[this].push_back(ip); // ip here is the call instruction itself
+    if (std::size(RAS[this]) > RAS_SIZE)
+      RAS[this].pop_front();
   }
 
-  // ---- RETURN ----
-  if (branch_type == BRANCH_RETURN && !std::empty(::RAS[this])) {
-    auto call_ip = ::RAS[this].back();
-    ::RAS[this].pop_back();
-
-    if (!std::empty(::SAS[this]))
-      ::SAS[this].pop_back();
-
-    auto estimated_size = std::abs((long)(call_ip - branch_target));
-    if (estimated_size <= 10) {
-      ::CALL_SIZE[this][call_ip % std::size(::CALL_SIZE[this])] = estimated_size;
-    }
-  }
-
-  // ---- INDIRECT ----
+  // Indirect target table update
   if ((branch_type == BRANCH_INDIRECT) || (branch_type == BRANCH_INDIRECT_CALL)) {
     auto hash = (ip >> 2) ^ ::CONDITIONAL_HISTORY[this].to_ullong();
     ::INDIRECT_BTB[this][hash % std::size(::INDIRECT_BTB[this])] = branch_target;
   }
 
-  // ---- CONDITIONAL HISTORY ----
+  // Conditional history for indirect hashing
   if ((branch_type == BRANCH_CONDITIONAL) || (branch_type == BRANCH_OTHER)) {
     ::CONDITIONAL_HISTORY[this] <<= 1;
     ::CONDITIONAL_HISTORY[this].set(0, taken);
   }
 
-  // ---- Determine type ----
-  auto type = branch_info::ALWAYS_TAKEN;
+  // RAS pop & call-size calibration on returns
+  if (branch_type == BRANCH_RETURN && !std::empty(::RAS[this])) {
+    auto call_ip = ::RAS[this].back();
+    ::RAS[this].pop_back();
+    auto estimated_call_instr_size = (call_ip > branch_target)
+                                         ? call_ip - branch_target
+                                         : branch_target - call_ip;
+    if (estimated_call_instr_size <= 10) {
+      ::CALL_SIZE[this][call_ip % std::size(::CALL_SIZE[this])] = estimated_call_instr_size;
+    }
+  }
 
+  // Determine transition under which this entry is stored.
+  // The core sets prev_block_transition according to how we arrived
+  // at the current block.  That same transition is the key for the
+  // NEXT prediction.
+  uint8_t trans = this->prev_block_transition;
+
+  // Map branch_type to stored type
+  auto type = ::branch_info::ALWAYS_TAKEN;
   if ((branch_type == BRANCH_INDIRECT) || (branch_type == BRANCH_INDIRECT_CALL))
-    type = branch_info::INDIRECT;
+    type = ::branch_info::INDIRECT;
   else if (branch_type == BRANCH_RETURN)
-    type = branch_info::RETURN;
+    type = ::branch_info::RETURN;
   else if ((branch_type == BRANCH_CONDITIONAL) || (branch_type == BRANCH_OTHER))
-    type = branch_info::CONDITIONAL;
+    type = ::branch_info::CONDITIONAL;
 
-  // ---- Transition ----
-  mbtb_transition trans;
+  // Fill/update the two-block ahead BTB entry
+  btb_entry_t new_entry{ip, branch_target, type, trans};
 
-  // R: previous instruction is a CALL
-  if (branch_type == BRANCH_DIRECT_CALL || branch_type == BRANCH_INDIRECT_CALL) {
-    trans = mbtb_transition::R;
-  }
-  // T: taken branch that is NOT a call/return
-  else if (taken &&
-    branch_type != BRANCH_RETURN &&
-    branch_type != BRANCH_DIRECT_CALL &&
-    branch_type != BRANCH_INDIRECT_CALL) {
-    trans = mbtb_transition::T;
-  }
-  // N: everything else (non-branch OR not-taken conditional)
-  else {
-    trans = mbtb_transition::N;
-  }
-
-  
-  // ---- Update MBTB using PREVIOUS branch ----
-  auto prev_ip = ::LAST_BRANCH_IP[this];
-  auto prev_trans = ::LAST_TRANSITION[this];
-
-  auto opt_entry = ::MBTB.at(this).check_hit({prev_ip, branch_target, type, prev_trans});
-
+  auto opt_entry = ::BTB.at(this).check_hit(new_entry);
   if (opt_entry.has_value()) {
-    opt_entry->target = branch_target;
     opt_entry->type = type;
+    if (branch_target != 0)
+      opt_entry->target = branch_target;
+    // transition stays as-is (it is part of the tag)
   }
 
   if (branch_target != 0) {
-    ::MBTB.at(this).fill(
-        opt_entry.value_or(mbtb_entry_t{prev_ip, branch_target, type, prev_trans})
-    );
+    ::BTB.at(this).fill(opt_entry.value_or(new_entry));
   }
-
-  // ---- Update LAST (Aa tracking) ----
-  ::LAST_BRANCH_IP[this] = ip;
-  ::LAST_TRANSITION[this] = trans;
 }

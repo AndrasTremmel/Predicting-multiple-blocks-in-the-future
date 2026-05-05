@@ -94,26 +94,37 @@ struct LSQ_ENTRY {
 class O3_CPU : public champsim::operable
 {
 public:
+     // ------------------------------------------------------------
+  // Two-block ahead state
   // ------------------------------------------------------------
-  // Stored prediction and target for multi-block prediction 
-  // ----------------------------------------------------------
-  // uint64_t previous_block_pred_target = 0;
-  // bool     previous_block_pred_taken  = false;
-  // bool     previous_block_valid       = false;
-  // uint64_t previous_block_branch_ip = 0;
-  // mbtb_transition previous_block_last_transition = mbtb_transition::N;
+  uint64_t prev_block_end_ip = 0;       // Aa : last instr of previous block
+  uint8_t  prev_block_transition = 0; // 0=N, 1=T, 2=R
+  bool     prev_block_valid = false;
 
+  uint64_t last_block_end_ip = 0;       // last instr seen in current block
+  uint8_t  last_block_taken = 0;
+  uint8_t  last_block_branch_type = 0;
+  bool     last_instr_was_taken_branch = false;
+  uint64_t current_block_start = 0;
 
-  // uint64_t last_branch_ip = 0;
-  // mbtb_transition last_transition = mbtb_transition::N;
+  // Buffered BTB update (key = Aa, value = current block's branch)
+  bool     pending_btb_valid = false;
+  uint64_t pending_btb_key = 0;
+  uint64_t pending_btb_branch_ip = 0;   // real branch IP for RAS / indirect
+  uint64_t pending_btb_target = 0;
+  uint8_t  pending_btb_taken = 0;
+  uint8_t  pending_btb_type = 0;
 
+  // Exposed to BTB module for RAS / indirect hashing
+  uint64_t last_fetched_branch_ip = 0;
 
-  // uint64_t previous_pred_target = 0;
-  // bool     previous_pred_always_taken = 0;
-  // bool     previous_pred_taken  = false;
-  // uint64_t previous_pred_branch_ip = 0;
+  // Cached prediction for the current block (tables accessed once per block)
+  bool     curr_block_pred_cached = false;
+  uint64_t curr_block_pred_target = 0;
+  uint8_t  curr_block_pred_always_taken = 0;
+  bool     curr_block_pred_taken = false;
 
-  // ---------------------------------------------------
+  //////////////////////////////////////////////////////////////////
 
   uint32_t cpu = 0;
 
