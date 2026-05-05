@@ -1,23 +1,4 @@
-/* Copyright 2020 HPS/SAFARI Research Groups
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+/* Copyright 2020 HPS/SAFARI Research Groups ... */
 
 #ifndef SPEC_TAGE_SC_L_TAGESCL_HPP_
 #define SPEC_TAGE_SC_L_TAGESCL_HPP_
@@ -37,9 +18,42 @@ struct Tage_SC_L_Prediction_Info {
   int rng_seed;
   bool final_prediction;
   bool updated_history = false;
-
-  // store if tage prediction is valid
   bool tage_prediction_valid = false;
+};
+
+// ---- MULTI-BLOCK SPECIFIC STATISTICS ----
+struct MultiBlockStats {
+  uint64_t ahead_predictions_generated = 0;
+  uint64_t ahead_predictions_valid = 0;
+  uint64_t ahead_predictions_invalid = 0;
+  uint64_t ahead_predictions_correct = 0;
+  uint64_t ahead_predictions_wrong = 0;
+  uint64_t overwritten_inflight_prediction = 0;
+  uint64_t buffer_id_reuse = 0;
+  uint64_t total_get_prediction_calls = 0;
+  uint64_t total_new_branch_ids = 0;
+  uint64_t pc_mismatch_predict_vs_commit = 0;
+  uint64_t pc_match_predict_vs_commit = 0;
+  uint64_t conditional_commits = 0;
+  uint64_t unconditional_commits = 0;
+
+  void print() const {
+    std::cout << "\n--- Multi-Block TAGE Diagnostics ---\n";
+    std::cout << "Ahead predictions generated:     " << ahead_predictions_generated << "\n";
+    std::cout << "Ahead predictions valid:         " << ahead_predictions_valid << "\n";
+    std::cout << "Ahead predictions invalid:       " << ahead_predictions_invalid << "\n";
+    std::cout << "Ahead predictions correct:       " << ahead_predictions_correct << "\n";
+    std::cout << "Ahead predictions wrong:         " << ahead_predictions_wrong << "\n";
+    std::cout << "Overwritten in-flight pred:      " << overwritten_inflight_prediction << "\n";
+    std::cout << "Buffer ID reuse detected:        " << buffer_id_reuse << "\n";
+    std::cout << "Total get_prediction calls:      " << total_get_prediction_calls << "\n";
+    std::cout << "Total new_branch_id calls:       " << total_new_branch_ids << "\n";
+    std::cout << "PC match (gen vs commit):        " << pc_match_predict_vs_commit << "\n";
+    std::cout << "PC mismatch (gen vs commit):     " << pc_mismatch_predict_vs_commit << "\n";
+    std::cout << "Conditional commits:             " << conditional_commits << "\n";
+    std::cout << "Unconditional commits:           " << unconditional_commits << "\n";
+    std::cout << "------------------------------------\n";
+  }
 };
 
 class Tage_SC_L_Base {
@@ -54,17 +68,10 @@ class Tage_SC_L_Base {
   virtual void commit_state_at_retire(uint32_t branch_id, uint64_t br_pc,
                                       Branch_Type br_type, bool resolve_dir,
                                       uint64_t br_target) = 0;
+  virtual const TageStats& get_stats() const = 0;
+  virtual void print_stats() const = 0;
 };
 
-/* Interface functions:
- *
- * warmup() a wrapper for updating predictor state during the warmup phase of a
- * simulation.
- *
- * predict_and_update() a wrapper for consecutive simultaneous prediction and
- * update that implement the idealistic algorithms without considering pipeline
- * requirements. (same as Championship Branch Prediction Interface)
- */
 template <class CONFIG>
 class Tage_SC_L : public Tage_SC_L_Base {
  public:
@@ -73,123 +80,92 @@ class Tage_SC_L : public Tage_SC_L_Base {
         prediction_info_buffer_(max_in_flight_branches, MULTI_BLOCK_AHEAD_DISTANCE) {}
 
   uint32_t get_new_branch_id() override {
+    mb_stats_.total_new_branch_ids++;
     uint32_t branch_id = prediction_info_buffer_.get_read_id();
+    auto& info = prediction_info_buffer_[branch_id];
+    if (info.updated_history || info.tage_prediction_valid) {
+      mb_stats_.buffer_id_reuse++;
+    }
     return branch_id;
   }
 
-  // It uses the speculative state of the predictor to generate a prediction.
-  // Should be called before update_speculative_state.
   bool get_prediction(uint32_t branch_id, uint64_t br_pc) override;
-
-  // It updates the speculative state (e.g. to insert history bits in Tage's
-  // global history register). For conditional branches, it should be called
-  // after get_prediction() in the front-end of a pipeline. For unconditional
-  // branches, it should be the only function called in the front-end.
   void update_speculative_state(uint32_t branch_id, uint64_t br_pc,
                                 Branch_Type br_type, bool branch_dir,
                                 uint64_t br_target) override;
-
-  // Invokes the default update algorithm for updating the predictor state.
-  // Can
-  // be called either at the end of execute or retire. Note that even though
-  // updating at the end of execute is speculative, committing the state
-  // cannot
-  // be undone.
-  void commit_state(uint32_t branch_id, uint64_t br_pc, Branch_Type br_type,
-                    bool resolve_dir) override;
-
-  // Updates predictor states that are critical for algorithm correctness.
-  // Thus, should always be called in the retire state and after
-  // commit_state()
-  // is called. branch_id is invalidated and should not be used anymore.
+  void commit_state(uint32_t branch_id, uint64_t br_pc,
+                    Branch_Type br_type, bool resolve_dir) override;
   void commit_state_at_retire(uint32_t branch_id, uint64_t br_pc,
                               Branch_Type br_type, bool resolve_dir,
                               uint64_t br_target) override;
 
+  const TageStats& get_stats() const override { return tage_.get_stats(); }
+  void print_stats() const override {
+    tage_.get_stats().print("MULTI-BLOCK TAGE");
+    mb_stats_.print();
+  }
+
  private:
   Random_Number_Generator random_number_gen_;
   Tage<typename CONFIG::TAGE> tage_;
-
-  // Used for remembering necessary information gathered during prediction that are needed for update.
   CircularBuffer<Tage_SC_L_Prediction_Info<CONFIG>> prediction_info_buffer_;
+  mutable MultiBlockStats mb_stats_;
 };
-
 
 template <class CONFIG>
 bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc) {
-  TAGE_DBG_INC();
-  TAGE_DBG("[TAGE_SC_L::GET] branch_id=" << branch_id << " br_pc=0x" << std::hex << br_pc << std::dec
-           << " read_id=" << prediction_info_buffer_.get_read_id()
-           << " alloc_id=" << prediction_info_buffer_.get_alloc_id());
-  
-  // ************************************************************
-  // * Create new prediction and add it to the prediction buffer
-  // ************************************************************
+  mb_stats_.total_get_prediction_calls++;
+
   auto& future_prediction_info = prediction_info_buffer_[branch_id + MULTI_BLOCK_AHEAD_DISTANCE];
+
+  if (future_prediction_info.tage_prediction_valid && future_prediction_info.updated_history) {
+    mb_stats_.overwritten_inflight_prediction++;
+  }
+
   tage_.get_prediction(br_pc, &future_prediction_info.tage);
+  mb_stats_.ahead_predictions_generated++;
   future_prediction_info.tage_prediction_valid = true;
   future_prediction_info.tage.br_pc_used_for_pred_gen = br_pc;
   future_prediction_info.final_prediction = future_prediction_info.tage.prediction;
 
-  TAGE_DBG("[TAGE_SC_L::GET] future_slot=" << (branch_id + MULTI_BLOCK_AHEAD_DISTANCE)
-           << " future_valid=1 future_pred=" << future_prediction_info.final_prediction
-           << " future_hit_bank=" << future_prediction_info.tage.hit_bank
-           << " future_alt_bank=" << future_prediction_info.tage.alt_bank);
-
-  // ***********************************************************
-  // * Get the prediction info for the current branch
-  // ***********************************************************
-  //std::cout << "Starting prediction for branch id:: " << branch_id << " and branch pc: " << br_pc << std::endl;
   auto& prediction_info = prediction_info_buffer_[branch_id];
-
-  // Update branch pc since it was unkown up until now
   prediction_info.br_pc = br_pc;
 
-  TAGE_DBG("[TAGE_SC_L::GET] curr_slot=" << branch_id
-           << " curr_valid=" << prediction_info.tage_prediction_valid
-           << " curr_pred=" << prediction_info.final_prediction
-           << " curr_hit_bank=" << prediction_info.tage.hit_bank
-           << " curr_alt_bank=" << prediction_info.tage.alt_bank);
-
-  if(prediction_info.tage_prediction_valid) {
-      TAGE_DBG("[TAGE_SC_L::GET] RETURNING curr_pred=" << prediction_info.final_prediction);
-      return prediction_info.final_prediction;
+  if (prediction_info.tage_prediction_valid) {
+    mb_stats_.ahead_predictions_valid++;
+    if (prediction_info.tage.br_pc_used_for_pred_gen == br_pc) {
+      mb_stats_.pc_match_predict_vs_commit++;
+    } else {
+      mb_stats_.pc_mismatch_predict_vs_commit++;
+    }
+    return prediction_info.final_prediction;
   }
 
-  TAGE_DBG("[TAGE_SC_L::GET] RETURNING false (no valid curr)");
+  mb_stats_.ahead_predictions_invalid++;
   return false;
 }
-
 
 template <class CONFIG>
 void Tage_SC_L<CONFIG>::commit_state(uint32_t branch_id, uint64_t br_pc,
                                      Branch_Type br_type, bool resolve_dir) {
-
-  // Only update TAGE for conditional branches                                  
   if (!br_type.is_conditional) {
-    return;
-  }
-  auto& prediction_info = prediction_info_buffer_[branch_id];
-  
-  TAGE_DBG("[TAGE_SC_L::COM] branch_id=" << branch_id << " br_pc=0x" << std::hex << br_pc << std::dec
-           << " resolve_dir=" << resolve_dir
-           << " is_conditional=" << br_type.is_conditional
-           << " tage_valid=" << prediction_info.tage_prediction_valid
-           << " final_pred=" << prediction_info.final_prediction
-           << " hit_bank=" << prediction_info.tage.hit_bank
-           << " alt_bank=" << prediction_info.tage.alt_bank);
-  
-  if(prediction_info.tage_prediction_valid) {
-    TAGE_DBG("[TAGE_SC_L::COM] calling tage_.commit_state with pred_pc=0x" << std::hex << prediction_info.tage.br_pc_used_for_pred_gen << std::dec
-             << " hit_bank=" << prediction_info.tage.hit_bank
-             << " idx=" << prediction_info.tage.indices[prediction_info.tage.hit_bank]
-             << " tag=" << prediction_info.tage.tags[prediction_info.tage.hit_bank]);
-    tage_.commit_state(prediction_info.tage.br_pc_used_for_pred_gen, resolve_dir, prediction_info.tage, prediction_info.final_prediction);
+    mb_stats_.unconditional_commits++;
   } else {
-    TAGE_DBG("[TAGE_SC_L::COM] SKIPPED (no valid tage info)");
+    mb_stats_.conditional_commits++;
+  }
+
+  auto& prediction_info = prediction_info_buffer_[branch_id];
+  if(prediction_info.tage_prediction_valid) {
+    if (br_type.is_conditional) {
+      bool correct = (prediction_info.final_prediction == resolve_dir);
+      if (correct) mb_stats_.ahead_predictions_correct++;
+      else mb_stats_.ahead_predictions_wrong++;
+    }
+    tage_.commit_state(prediction_info.tage.br_pc_used_for_pred_gen, resolve_dir,
+                       prediction_info.tage, prediction_info.final_prediction,
+                       br_type.is_conditional);
   }
 }
-
 
 template <class CONFIG>
 void Tage_SC_L<CONFIG>::commit_state_at_retire(uint32_t branch_id,
@@ -197,35 +173,14 @@ void Tage_SC_L<CONFIG>::commit_state_at_retire(uint32_t branch_id,
                                                Branch_Type br_type,
                                                bool resolve_dir,
                                                uint64_t br_target) {
-  //std::cout << "Starting retire for branch id: " << branch_id << std::endl;                                                 
   auto& prediction_info = prediction_info_buffer_[branch_id];
-  
-  TAGE_DBG("[TAGE_SC_L::RET] branch_id=" << branch_id << " br_pc=0x" << std::hex << br_pc << std::dec
-           << " updated_history=" << prediction_info.updated_history
-           << " target=0x" << std::hex << br_target << std::dec);
-  
-  // This can only hold for branch instructions as it 
-  // requires speculative update to be already done 
-  // on the instruction which is called from inside the 
-  // O3_CPU::last_branch_result ChampSim API function
-  // which is only called after O3_CPU::predict_branch if
-  // the instruction is actually a branch instruction.
   if (prediction_info.updated_history) {
-    //std::cout << "Updated history changed..." << std::endl;
-    
-    //std::cout << "Calling tage reire..." << std::endl;
-    TAGE_DBG("[TAGE_SC_L::RET] retiring history bits=" << prediction_info.tage.num_global_history_bits);
     tage_.commit_state_at_retire(prediction_info.tage);
-    
-    //std::cout << "Deallocating front element of predicton info buffer..." << std::endl;
     prediction_info_buffer_.deallocate_front(branch_id);
-    TAGE_DBG("[TAGE_SC_L::RET] deallocated front, new_read=" << prediction_info_buffer_.get_read_id()
-             << " new_alloc=" << prediction_info_buffer_.get_alloc_id());
-  } else {
-    TAGE_DBG("[TAGE_SC_L::RET] SKIPPED dealloc (updated_history=false)");
-  }
-}
 
+  }
+  
+}
 
 template <class CONFIG>
 void Tage_SC_L<CONFIG>::update_speculative_state(uint32_t branch_id,
@@ -236,12 +191,6 @@ void Tage_SC_L<CONFIG>::update_speculative_state(uint32_t branch_id,
   auto& prediction_info = prediction_info_buffer_[branch_id];
   prediction_info.rng_seed = random_number_gen_.seed_;
   prediction_info.updated_history = true;
-  
-  TAGE_DBG("[TAGE_SC_L::UPD] branch_id=" << branch_id << " br_pc=0x" << std::hex << br_pc << std::dec
-           << " dir=" << branch_dir << " is_cond=" << br_type.is_conditional
-           << " is_indir=" << br_type.is_indirect
-           << " target=0x" << std::hex << br_target << std::dec);
-           
   tage_.update_speculative_state(br_pc, br_target, br_type, branch_dir,
                                  &prediction_info.tage);
 }
