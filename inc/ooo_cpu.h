@@ -94,35 +94,42 @@ struct LSQ_ENTRY {
 class O3_CPU : public champsim::operable
 {
 public:
-     // ------------------------------------------------------------
-  // Two-block ahead state
+       // ------------------------------------------------------------
+  // Two-block-ahead block-level state
   // ------------------------------------------------------------
   uint64_t prev_block_end_ip = 0;       // Aa : last instr of previous block
-  uint8_t  prev_block_transition = 0; // 0=N, 1=T, 2=R
+  uint8_t  prev_block_transition = 0;   // 0=N, 1=T, 2=R
   bool     prev_block_valid = false;
 
-  uint64_t last_block_end_ip = 0;       // last instr seen in current block
+  uint64_t last_block_end_ip = 0;       // last branch seen in current block
   uint8_t  last_block_taken = 0;
   uint8_t  last_block_branch_type = 0;
   bool     last_instr_was_taken_branch = false;
   uint64_t current_block_start = 0;
 
-  // Buffered BTB update (key = Aa, value = current block's branch)
+  // Cached once-per-block prediction
+  bool     block_pred_valid = false;
+  bool     block_pred_taken = false;
+  uint64_t block_pred_target = 0;
+  uint8_t  block_pred_pos = 0;          // position b returned by BTB
+  bool     block_pred_pos_valid = false;
+  uint8_t  block_instr_idx = 0;         // instruction counter inside block
+
+  // Buffered BTB update (committed at next block start)
   bool     pending_btb_valid = false;
   uint64_t pending_btb_key = 0;
-  uint64_t pending_btb_branch_ip = 0;   // real branch IP for RAS / indirect
+  uint64_t pending_btb_branch_ip = 0;   // real branch IP for RAS/indirect
   uint64_t pending_btb_target = 0;
   uint8_t  pending_btb_taken = 0;
   uint8_t  pending_btb_type = 0;
+  uint8_t  pending_btb_pos = 0;         // position b of this branch in its block
 
-  // Exposed to BTB module for RAS / indirect hashing
+  // Side-channel: BTB module writes the position here during lookup
+  uint8_t  btb_returned_pos = 0;
+  bool     btb_returned_pos_valid = false;
+
+  // Exposed to BTB module so RAS / indirect hashing use the real branch PC
   uint64_t last_fetched_branch_ip = 0;
-
-  // Cached prediction for the current block (tables accessed once per block)
-  bool     curr_block_pred_cached = false;
-  uint64_t curr_block_pred_target = 0;
-  uint8_t  curr_block_pred_always_taken = 0;
-  bool     curr_block_pred_taken = false;
 
   //////////////////////////////////////////////////////////////////
 

@@ -155,8 +155,13 @@ bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
                    last_instr_was_taken_branch ||
                    (curr_cl != current_block_start);
 
+  // The two-block-ahead key is identical for every instruction in this block
+  uint64_t pred_ip = (prev_block_valid && prev_block_end_ip != 0)
+                         ? prev_block_end_ip
+                         : arch_instr.ip;
+
   if (new_block) {
-    // Commit the BTB update for the block that just ended
+    // Commit the buffered BTB update for the block that just ended
     if (pending_btb_valid) {
       last_fetched_branch_ip = pending_btb_branch_ip;
       impl_update_btb(pending_btb_key, pending_btb_target,
@@ -174,68 +179,114 @@ bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
     prev_block_valid       = true;
     current_block_start    = curr_cl;
 
-    // ---- Two-block-ahead BTB lookup (performed ONCE per block) ----
-    uint64_t pred_ip = (prev_block_valid && prev_block_end_ip != 0)
-                           ? prev_block_end_ip
-                           : arch_instr.ip;
-
+    // ---- Block-level BTB lookup (once per block) ----
     auto [predicted_branch_target, always_taken] = impl_btb_prediction(pred_ip);
-    curr_block_pred_target       = predicted_branch_target;
-    curr_block_pred_always_taken = always_taken;
+
+    // TAGE wrapper tick (once per instruction, but same key for whole block)
+    bool tage_pred = impl_predict_branch(pred_ip);
+
+    // Cache the block-level result
+    block_pred_target    = predicted_branch_target;
+    block_pred_taken     = tage_pred || always_taken;
+    block_pred_valid     = true;
+    block_pred_pos       = btb_returned_pos_valid ? btb_returned_pos : 255;
+    block_pred_pos_valid = btb_returned_pos_valid;
+    block_instr_idx      = 0;
+  } else {
+    // Same block: still tick the wrapper so the previous instruction is
+    // retired and a fresh ID is allocated for this one.
+    (void)impl_predict_branch(pred_ip);
   }
 
-  // ---- TAGE wrapper: called for EVERY instruction ----
-  // We must keep the wrapper's in-flight branch ID bookkeeping
-  // consistent (one ID per instruction).  The actual table index is
-  // the two-block-ahead key, identical for every instruction in this block.
-  uint64_t pred_ip = (prev_block_valid && prev_block_end_ip != 0)
-                         ? prev_block_end_ip
-                         : arch_instr.ip;
-
-  arch_instr.branch_prediction = impl_predict_branch(pred_ip) || curr_block_pred_always_taken;
-  uint64_t predicted_branch_target = curr_block_pred_target;
-  if (arch_instr.branch_prediction == 0)
-    predicted_branch_target = 0;
-
+  // ---- Process the current instruction ----
   if (arch_instr.is_branch) {
     if constexpr (champsim::debug_print) {
       fmt::print("[BRANCH] instr_id: {} ip: {:#x} taken: {}\n",
                  arch_instr.instr_id, arch_instr.ip, arch_instr.branch_taken);
     }
 
-    // code prefetcher still sees the actual branch IP
+    uint64_t predicted_branch_target = 0;
+    bool     branch_prediction = false;
+
+    if (block_pred_pos_valid && block_instr_idx < block_pred_pos) {
+      // Branch appears BEFORE the predicted terminating position.
+      // The BTB says the block continues → force not-taken.
+      predicted_branch_target = 0;
+      branch_prediction = false;
+
+      if (arch_instr.branch_taken) {
+        // Taken early → BTB was wrong about block structure. Mispredict.
+        sim_stats.total_rob_occupancy_at_branch_mispredict += std::size(ROB);
+        sim_stats.branch_type_misses[arch_instr.branch_type]++;
+        if (!warmup) {
+          fetch_resume_cycle = std::numeric_limits<uint64_t>::max();
+          stop_fetch = true;
+          arch_instr.branch_mispredicted = 1;
+        }
+      }
+    } else if (block_pred_pos_valid && block_instr_idx == block_pred_pos) {
+      // This is the predicted terminating branch (Bb).  Use the
+      // two-block-ahead prediction made with key Aa and history Ha.
+      predicted_branch_target = block_pred_target;
+      branch_prediction = block_pred_taken;
+      if (!branch_prediction)
+        predicted_branch_target = 0;
+
+      // Standard misprediction check
+      if (predicted_branch_target != arch_instr.branch_target
+          || (((arch_instr.branch_type == BRANCH_CONDITIONAL) ||
+               (arch_instr.branch_type == BRANCH_OTHER))
+              && arch_instr.branch_taken != branch_prediction)) {
+        sim_stats.total_rob_occupancy_at_branch_mispredict += std::size(ROB);
+        sim_stats.branch_type_misses[arch_instr.branch_type]++;
+        if (!warmup) {
+          fetch_resume_cycle = std::numeric_limits<uint64_t>::max();
+          stop_fetch = true;
+          arch_instr.branch_mispredicted = 1;
+        }
+      } else {
+        stop_fetch = arch_instr.branch_taken;
+      }
+    } else {
+      // BTB missed (no position known) or we passed expected position.
+      // Safe fallback: predict not-taken.
+      predicted_branch_target = 0;
+      branch_prediction = false;
+
+      if (arch_instr.branch_taken) {
+        sim_stats.total_rob_occupancy_at_branch_mispredict += std::size(ROB);
+        sim_stats.branch_type_misses[arch_instr.branch_type]++;
+        if (!warmup) {
+          fetch_resume_cycle = std::numeric_limits<uint64_t>::max();
+          stop_fetch = true;
+          arch_instr.branch_mispredicted = 1;
+        }
+      }
+    }
+
+    arch_instr.branch_prediction = branch_prediction;
+
+    // Code prefetcher still sees the real branch IP
     l1i->impl_prefetcher_branch_operate(arch_instr.ip, arch_instr.branch_type,
                                         predicted_branch_target);
 
-    // misprediction check
-    if (predicted_branch_target != arch_instr.branch_target
-        || (((arch_instr.branch_type == BRANCH_CONDITIONAL) ||
-             (arch_instr.branch_type == BRANCH_OTHER))
-            && arch_instr.branch_taken != arch_instr.branch_prediction)) {
-      sim_stats.total_rob_occupancy_at_branch_mispredict += std::size(ROB);
-      sim_stats.branch_type_misses[arch_instr.branch_type]++;
-      if (!warmup) {
-        fetch_resume_cycle = std::numeric_limits<uint64_t>::max();
-        stop_fetch = true;
-        arch_instr.branch_mispredicted = 1;
-      }
-    } else {
-      stop_fetch = arch_instr.branch_taken;
-    }
-
-    // TAGE history update uses the *real* branch IP (Bb), not the key
+    // CRITICAL: Update TAGE history for EVERY branch, not just the
+    // terminating one.  This inserts intermediate branch outcomes into
+    // the global history register so future predictions see complete history.
     impl_last_branch_result(arch_instr.ip, arch_instr.branch_target,
                             arch_instr.branch_taken, arch_instr.branch_type);
 
-    // Buffer the BTB update: key = Aa, value = this block's terminating branch
+    // Buffer the BTB update for the NEXT block.  Keyed by the PREVIOUS
+    // block's end (Aa).  The real branch IP is saved for RAS/indirect.
     pending_btb_key       = prev_block_valid ? prev_block_end_ip : arch_instr.ip;
-    pending_btb_branch_ip = arch_instr.ip;   // real IP needed by RAS/indirect
+    pending_btb_branch_ip = arch_instr.ip;
     pending_btb_target    = arch_instr.branch_target;
     pending_btb_taken     = arch_instr.branch_taken;
     pending_btb_type      = arch_instr.branch_type;
+    pending_btb_pos       = block_instr_idx;   // actual position for BTB
     pending_btb_valid     = true;
 
-    // Book-keeping for next block boundary
+    // Book-keeping for block-boundary detection
     last_block_end_ip      = arch_instr.ip;
     last_block_taken       = arch_instr.branch_taken;
     last_block_branch_type = arch_instr.branch_type;
@@ -248,6 +299,7 @@ bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
     last_block_end_ip = arch_instr.ip;
   }
 
+  block_instr_idx++;
   return stop_fetch;
 }
 
@@ -261,7 +313,6 @@ bool O3_CPU::do_init_instruction(ooo_model_instr& arch_instr)
   ::do_stack_pointer_folding(arch_instr);
   return do_predict_branch(arch_instr);
 }
-
 
 // bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
 // {

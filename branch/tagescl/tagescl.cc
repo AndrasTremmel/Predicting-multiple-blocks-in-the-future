@@ -41,7 +41,8 @@ std::uint8_t O3_CPU::predict_branch(std::uint64_t ip)
 {
   ChampsimTageScl& predictor = get_predictor(this);
   if (predictor.state == ChampsimTageScl::PREDICTED) {
-    // Previous instruction was not a branch -> retire it as non-branch.
+    // Previous block had no terminating branch (cache-line boundary).
+    // Retire the pending prediction as non-branch without updating history.
     tagescl::Branch_Type type;
     type.is_conditional = false;
     type.is_indirect = false;
@@ -63,9 +64,9 @@ void O3_CPU::last_branch_result(std::uint64_t ip, uint64_t target,
 
   // Two-block-ahead: predict_branch was called with the PREVIOUS block's
   // end IP (Aa), but the branch that actually resolves is the CURRENT
-  // block's branch (Bb).  The predictor tables are therefore updated
-  // with the real branch IP, which is exactly what the paper describes.
-  // assert(predictor.last_ip == ip);  // <-- removed for two-block-ahead
+  // block's branch (Bb).  The TAGE tables (indexed by Aa) are updated
+  // with the real outcome of Bb.  This is exactly what the paper describes.
+  // assert(predictor.last_ip == ip);  // removed for two-block-ahead
 
   tagescl::Branch_Type type;
   type.is_conditional =
@@ -74,8 +75,7 @@ void O3_CPU::last_branch_result(std::uint64_t ip, uint64_t target,
       branch_type == BRANCH_INDIRECT or branch_type == BRANCH_INDIRECT_CALL or
       branch_type == BRANCH_RETURN or branch_type == BRANCH_OTHER;
 
-  predictor.impl.update_speculative_state(predictor.id, ip, type, taken,
-                                          target);
+  predictor.impl.update_speculative_state(predictor.id, ip, type, taken, target);
   if (type.is_conditional) {
     predictor.impl.commit_state(predictor.id, ip, type, taken);
   }
