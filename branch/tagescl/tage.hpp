@@ -171,38 +171,36 @@ struct TageStats {
   uint64_t confidence_low_wrong = 0;
 
   void print(const char* name) const {
-    std::cout << "\n========== " << name << " STATISTICS ==========\n";
-    std::cout << "Total predictions:        " << total_predictions << "\n";
-    std::cout << "Total mispredictions:     " << total_mispredictions << "\n";
+    std::cerr << "\n========== " << name << " STATISTICS ==========\n";
+    std::cerr << "Total predictions:        " << total_predictions << "\n";
+    std::cerr << "Total mispredictions:     " << total_mispredictions << "\n";
     if (total_predictions > 0)
-      std::cout << "Misprediction rate:       " << std::fixed << std::setprecision(6)
+      std::cerr << "Misprediction rate:       " << std::fixed << std::setprecision(6)
                 << (100.0 * total_mispredictions / total_predictions) << "%\n";
-    std::cout << "Bimodal used:             " << bimodal_used << "\n";
-    std::cout << "Bimodal mispredictions:   " << bimodal_mispredictions << "\n";
-    std::cout << "Tagged used:              " << tagged_used << "\n";
-    std::cout << "Tagged mispredictions:    " << tagged_mispredictions << "\n";
-    std::cout << "Longest match correct:    " << longest_match_correct << "\n";
-    std::cout << "Longest match wrong:      " << longest_match_wrong << "\n";
-    std::cout << "Alt used correct:         " << alt_prediction_correct << "\n";
-    std::cout << "Alt used wrong:           " << alt_prediction_wrong << "\n";
-    std::cout << "Weak longest correct:     " << weak_longest_correct << "\n";
-    std::cout << "Weak longest wrong:       " << weak_longest_wrong << "\n";
-    std::cout << "New entries allocated:    " << new_entries_allocated << "\n";
-    std::cout << "High conf correct:        " << confidence_high_correct << "\n";
-    std::cout << "High conf wrong:          " << confidence_high_wrong << "\n";
-    std::cout << "Medium conf correct:      " << confidence_medium_correct << "\n";
-    std::cout << "Medium conf wrong:        " << confidence_medium_wrong << "\n";
-    std::cout << "Low conf correct:         " << confidence_low_correct << "\n";
-    std::cout << "Low conf wrong:           " << confidence_low_wrong << "\n";
-    std::cout << "Bank hit distribution:\n";
+    std::cerr << "Bimodal used:             " << bimodal_used << "\n";
+    std::cerr << "Bimodal mispredictions:   " << bimodal_mispredictions << "\n";
+    std::cerr << "Tagged used:              " << tagged_used << "\n";
+    std::cerr << "Tagged mispredictions:    " << tagged_mispredictions << "\n";
+    std::cerr << "Longest match correct:    " << longest_match_correct << "\n";
+    std::cerr << "Longest match wrong:      " << longest_match_wrong << "\n";
+    std::cerr << "Alt used correct:         " << alt_prediction_correct << "\n";
+    std::cerr << "Alt used wrong:           " << alt_prediction_wrong << "\n";
+    std::cerr << "Weak longest correct:     " << weak_longest_correct << "\n";
+    std::cerr << "Weak longest wrong:       " << weak_longest_wrong << "\n";
+    std::cerr << "New entries allocated:    " << new_entries_allocated << "\n";
+    std::cerr << "High conf correct:        " << confidence_high_correct << "\n";
+    std::cerr << "High conf wrong:          " << confidence_high_wrong << "\n";
+    std::cerr << "Medium conf correct:      " << confidence_medium_correct << "\n";
+    std::cerr << "Medium conf wrong:        " << confidence_medium_wrong << "\n";
+    std::cerr << "Low conf correct:         " << confidence_low_correct << "\n";
+    std::cerr << "Low conf wrong:           " << confidence_low_wrong << "\n";
+    std::cerr << "Bank hit distribution:\n";
     for (int i = 1; i < 45; ++i) {
       if (bank_hits[i] > 0)
-        std::cout << "  Bank " << i << ": " << bank_hits[i] << "\n";
+        std::cerr << "  Bank " << i << ": " << bank_hits[i] << "\n";
     }
-    std::cout << "=============================================\n";
-    // Inside TageStats::print(), after the last line:
-    std::cout << "=============================================\n";
-    std::cout << std::flush;  // <-- ADD THIS
+    std::cerr << "=============================================\n";
+    std::cerr << std::flush;
   }
 };
 

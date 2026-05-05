@@ -38,21 +38,22 @@ struct MultiBlockStats {
   uint64_t unconditional_commits = 0;
 
   void print() const {
-    std::cout << "\n--- Multi-Block TAGE Diagnostics ---\n";
-    std::cout << "Ahead predictions generated:     " << ahead_predictions_generated << "\n";
-    std::cout << "Ahead predictions valid:         " << ahead_predictions_valid << "\n";
-    std::cout << "Ahead predictions invalid:       " << ahead_predictions_invalid << "\n";
-    std::cout << "Ahead predictions correct:       " << ahead_predictions_correct << "\n";
-    std::cout << "Ahead predictions wrong:         " << ahead_predictions_wrong << "\n";
-    std::cout << "Overwritten in-flight pred:      " << overwritten_inflight_prediction << "\n";
-    std::cout << "Buffer ID reuse detected:        " << buffer_id_reuse << "\n";
-    std::cout << "Total get_prediction calls:      " << total_get_prediction_calls << "\n";
-    std::cout << "Total new_branch_id calls:       " << total_new_branch_ids << "\n";
-    std::cout << "PC match (gen vs commit):        " << pc_match_predict_vs_commit << "\n";
-    std::cout << "PC mismatch (gen vs commit):     " << pc_mismatch_predict_vs_commit << "\n";
-    std::cout << "Conditional commits:             " << conditional_commits << "\n";
-    std::cout << "Unconditional commits:           " << unconditional_commits << "\n";
-    std::cout << "------------------------------------\n";
+    std::cerr << "\n--- Multi-Block TAGE Diagnostics ---\n";
+    std::cerr << "Ahead predictions generated:     " << ahead_predictions_generated << "\n";
+    std::cerr << "Ahead predictions valid:         " << ahead_predictions_valid << "\n";
+    std::cerr << "Ahead predictions invalid:       " << ahead_predictions_invalid << "\n";
+    std::cerr << "Ahead predictions correct:       " << ahead_predictions_correct << "\n";
+    std::cerr << "Ahead predictions wrong:         " << ahead_predictions_wrong << "\n";
+    std::cerr << "Overwritten in-flight pred:      " << overwritten_inflight_prediction << "\n";
+    std::cerr << "Buffer ID reuse detected:        " << buffer_id_reuse << "\n";
+    std::cerr << "Total get_prediction calls:      " << total_get_prediction_calls << "\n";
+    std::cerr << "Total new_branch_id calls:       " << total_new_branch_ids << "\n";
+    std::cerr << "PC match (gen vs commit):        " << pc_match_predict_vs_commit << "\n";
+    std::cerr << "PC mismatch (gen vs commit):     " << pc_mismatch_predict_vs_commit << "\n";
+    std::cerr << "Conditional commits:             " << conditional_commits << "\n";
+    std::cerr << "Unconditional commits:           " << unconditional_commits << "\n";
+    std::cerr << "------------------------------------\n";
+    std::cerr << std::flush;
   }
 };
 
