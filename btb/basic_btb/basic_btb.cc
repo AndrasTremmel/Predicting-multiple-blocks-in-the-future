@@ -88,10 +88,8 @@ class BaselineBTBContext {
   }
 
   void print_all() {
-    std::ofstream file("baseline_btb_stats.txt", std::ios::app);
     auto out = [&](const std::string& s) {
       std::cerr << s;
-      if (file.is_open()) file << s;
     };
 
     for (auto& [cpu, stats] : STATS) {
@@ -134,7 +132,6 @@ class BaselineBTBContext {
     }
 
     std::cerr << std::flush;
-    if (file.is_open()) file.close();
   }
 };
 

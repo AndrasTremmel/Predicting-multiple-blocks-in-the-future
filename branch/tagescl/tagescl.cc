@@ -31,17 +31,10 @@ static ChampsimTageScl& get_predictor(const O3_CPU* cpu) {
 class BaselineTagePrinter {
  public:
   ~BaselineTagePrinter() {
-    std::ofstream file("baseline_tage_stats.txt", std::ios::app);
     for (auto& p : predictors) {
       p.impl.print_stats();
-      if (file.is_open()) {
-        // Capture print_stats output to file by redirecting temporarily
-        // Since print_stats writes to std::cout, we can't easily redirect.
-        // Instead, we rely on the file output added inside print_stats.
-      }
     }
     std::cerr << std::flush;
-    if (file.is_open()) file.close();
   }
 };
 static BaselineTagePrinter baseline_tage_printer;
@@ -78,9 +71,7 @@ void O3_CPU::last_branch_result(std::uint64_t ip, std::uint64_t target,
       branch_type == BRANCH_INDIRECT or branch_type == BRANCH_INDIRECT_CALL or
       branch_type == BRANCH_RETURN or branch_type == BRANCH_OTHER;
   predictor.impl.update_speculative_state(predictor.id, ip, type, taken, target);
-  if (type.is_conditional) {
-    predictor.impl.commit_state(predictor.id, ip, type, taken);
-  }
+  predictor.impl.commit_state(predictor.id, ip, type, taken);
   predictor.impl.commit_state_at_retire(predictor.id, ip, type, taken, target);
   predictor.state = ChampsimTageScl::NONE;
 }

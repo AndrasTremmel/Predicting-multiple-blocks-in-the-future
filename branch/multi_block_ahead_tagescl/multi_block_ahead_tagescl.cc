@@ -31,12 +31,10 @@ static ChampsimTageScl& get_predictor(const O3_CPU* cpu) {
 class MultiBlockTagePrinter {
  public:
   ~MultiBlockTagePrinter() {
-    std::ofstream file("multi_block_tage_stats.txt", std::ios::app);
     for (auto& p : predictors) {
       p.impl.print_stats();
     }
     std::cerr << std::flush;
-    if (file.is_open()) file.close();
   }
 };
 static MultiBlockTagePrinter multi_block_tage_printer;

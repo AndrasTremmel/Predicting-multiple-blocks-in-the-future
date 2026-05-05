@@ -150,17 +150,17 @@ void Tage_SC_L<CONFIG>::commit_state(uint32_t branch_id, uint64_t br_pc,
                                      Branch_Type br_type, bool resolve_dir) {
   if (!br_type.is_conditional) {
     mb_stats_.unconditional_commits++;
+    return;
   } else {
     mb_stats_.conditional_commits++;
   }
 
   auto& prediction_info = prediction_info_buffer_[branch_id];
   if(prediction_info.tage_prediction_valid) {
-    if (br_type.is_conditional) {
-      bool correct = (prediction_info.final_prediction == resolve_dir);
-      if (correct) mb_stats_.ahead_predictions_correct++;
-      else mb_stats_.ahead_predictions_wrong++;
-    }
+    bool correct = (prediction_info.final_prediction == resolve_dir);
+    if (correct) mb_stats_.ahead_predictions_correct++;
+    else mb_stats_.ahead_predictions_wrong++;
+
     tage_.commit_state(prediction_info.tage.br_pc_used_for_pred_gen, resolve_dir,
                        prediction_info.tage, prediction_info.final_prediction,
                        br_type.is_conditional);
