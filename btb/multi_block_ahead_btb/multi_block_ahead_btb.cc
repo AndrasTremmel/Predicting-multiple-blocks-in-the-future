@@ -406,3 +406,4 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
   g_ctx.LAST_BRANCH_IP[this] = ip;
   g_ctx.LAST_TRANSITION[this] = trans;
 }
+
