@@ -884,32 +884,9 @@
 
 
 
-/*
- * Multi-Block Ahead BTB with full Second-Address-Stack (SAS) prediction
- * (Seznec, Jourdan, Sainrat & Michaud, ASPLOS '96), adapted to ChampSim's
- * per-instruction prediction interface.
- *
- * Key design point versus the previous attempt:
- *
- *   The SAS now lives in a DEDICATED table (SAS_TABLE) indexed by call_ip,
- *   NOT inside the MBTB. The previous attempt repurposed MBTB[(call_ip, R)]
- *   to hold post-return-branch info, but ChampSim's natural "first branch
- *   inside the procedure" prediction also keys on (call_ip, R). Sharing
- *   that slot caused the two predictions to clobber each other, and showed
- *   up as a big jump in BTB target-wrong counts.
- *
- *   The MBTB read/write paths are therefore byte-identical to the original
- *   baseline. The SAS pathway is purely additive: at the post-return branch
- *   we PREFER the SAS hint, and FALL BACK to the original MBTB lookup
- *   (return_ip, N) if the SAS hint is invalid. So non-SAS predictions
- *   never regress.
- *
- *   ChampSim invokes btb_prediction()/predict_branch() once per instruction,
- *   not per branch, so RAS / SAS / PENDING_SAS_ENTRY are only PEEKED in
- *   btb_prediction() and only POPPED / MUTATED in update_btb() once the
- *   instruction's true type is known. Non-branch instructions therefore
- *   leave all stack state untouched.
- */
+
+
+
 
 #include <cstdint>
 #include <map>
@@ -954,8 +931,7 @@ struct mbtb_entry_t {
   auto tag() const { return (ip_tag >> 2) ^ static_cast<uint64_t>(transition); }
 };
 
-// Compact record for SAS data. Held both inside SAS_TABLE (indexed by
-// call_ip) and inside the SAS deque (snapshots, captured at call time).
+// Compact record for SAS data. Held inside the SAS deque (snapshots, captured at call time).
 struct sas_record_t {
   uint64_t target = 0;
   branch_info type = branch_info::ALWAYS_TAKEN;
@@ -1007,13 +983,13 @@ struct mbtb_stats_t {
   uint64_t sas_pops = 0;
   uint64_t sas_empty_on_pop = 0;
   // SAS-prediction-specific stats:
-  uint64_t sas_push_valid = 0;          // call-time SAS_TABLE lookup hit
-  uint64_t sas_push_invalid = 0;        // call-time SAS_TABLE lookup miss
+  uint64_t sas_push_valid = 0;          // call-time SAS entry lookup hit
+  uint64_t sas_push_invalid = 0;        // call-time SAS entry lookup miss
   uint64_t sas_pred_used = 0;           // post-return branch fed from SAS
   uint64_t sas_pred_fallback = 0;       // post-return branch fell back to MBTB
   uint64_t sas_pred_target_correct = 0;
   uint64_t sas_pred_target_wrong = 0;
-  uint64_t sas_table_writes = 0;        // post-return branches recorded into SAS_TABLE
+  uint64_t sas_writes = 0;        // post-return branches recorded as SAS entries
 };
 
 constexpr std::size_t BTB_SET = 2048;
@@ -1030,7 +1006,6 @@ class MultiBlockBTBContext {
   std::map<O3_CPU*, std::bitset<champsim::lg2(BTB_INDIRECT_SIZE)>> CONDITIONAL_HISTORY;
   std::map<O3_CPU*, std::deque<uint64_t>> RAS;
   std::map<O3_CPU*, std::deque<sas_record_t>> SAS;            // snapshots
-  std::map<O3_CPU*, std::unordered_map<uint64_t, sas_record_t>> SAS_TABLE; // call_ip -> last seen post-return info
   std::map<O3_CPU*, std::array<uint64_t, CALL_SIZE_TRACKERS>> CALL_SIZE;
   std::map<O3_CPU*, uint64_t> LAST_BRANCH_IP;
   std::map<O3_CPU*, mbtb_transition> LAST_TRANSITION;
@@ -1098,7 +1073,7 @@ class MultiBlockBTBContext {
       out("Post-return MBTB fallback:" + std::to_string(stats.sas_pred_fallback) + "\n");
       out("SAS pred target correct:  " + std::to_string(stats.sas_pred_target_correct) + "\n");
       out("SAS pred target wrong:    " + std::to_string(stats.sas_pred_target_wrong) + "\n");
-      out("SAS_TABLE writes:         " + std::to_string(stats.sas_table_writes) + "\n");
+      out("SAS entry writes:         " + std::to_string(stats.sas_writes) + "\n");
       out("=================================================\n");
     }
 
@@ -1123,7 +1098,6 @@ void O3_CPU::initialize_btb()
   g_ctx.PENDING_SAS_ENTRY[this] = sas_record_t{};
   g_ctx.RAS[this].clear();
   g_ctx.SAS[this].clear();
-  g_ctx.SAS_TABLE[this].clear();
   g_ctx.PRED_QUEUE[this].clear();
   g_ctx.STATS[this] = {};
 }
@@ -1131,7 +1105,7 @@ void O3_CPU::initialize_btb()
 std::pair<uint64_t, uint8_t> O3_CPU::btb_prediction(uint64_t ip)
 {
   auto prev_ip   = g_ctx.LAST_BRANCH_IP[this];
-  auto trans     = g_ctx.LAST_TRANSITION[this];
+  auto trans     = g_ctx.LAST_TRANSITION[this] == mbtb_transition::R ? mbtb_transition::T : g_ctx.LAST_TRANSITION[this];
   bool was_ret   = g_ctx.LAST_BRANCH_WAS_RETURN[this];
   auto& pend_sas = g_ctx.PENDING_SAS_ENTRY[this];
 
@@ -1323,15 +1297,17 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
     g_ctx.RAS[this].push_back(ip);
 
     sas_record_t snap{};
-    auto& tbl = g_ctx.SAS_TABLE[this];
-    auto it = tbl.find(ip);
-    if (it != tbl.end() && it->second.valid) {
-      snap = it->second;
+    auto entry = g_ctx.MBTB.at(this).check_hit({ip, 0, branch_info::ALWAYS_TAKEN, mbtb_transition::R});
+    if (entry.has_value()) {
+      snap.target = entry->target;
+      snap.type = entry->type;
+      snap.valid = true;
       stats.sas_push_valid++;
     } else {
       snap.valid = false;
       stats.sas_push_invalid++;
     }
+
     g_ctx.SAS[this].push_back(snap);
     stats.sas_pushes++;
 
@@ -1408,36 +1384,35 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
   auto prev_ip    = g_ctx.LAST_BRANCH_IP[this];
   auto prev_trans = g_ctx.LAST_TRANSITION[this];
 
-  auto opt_entry = g_ctx.MBTB.at(this).check_hit(
-      {prev_ip, branch_target, type, prev_trans});
+  if (prev_was_return) {
+    if (branch_target != 0) {
+      auto opt_entry = g_ctx.MBTB.at(this).check_hit({pr_call_ip, branch_target, type, mbtb_transition::R});
+      if (opt_entry.has_value()) {
+        opt_entry->target = branch_target;
+        opt_entry->type = type;
+      }
 
-  if (opt_entry.has_value()) {
-    if (branch_target != 0) opt_entry->target = branch_target;
-    opt_entry->type = type;
+      g_ctx.MBTB.at(this).fill(opt_entry.value_or(mbtb_entry_t{pr_call_ip, branch_target, type, mbtb_transition::R}));
+      stats.sas_writes++;
+    }
+  } else {
+    prev_trans = g_ctx.LAST_TRANSITION[this] == mbtb_transition::R ? mbtb_transition::T : g_ctx.LAST_TRANSITION[this];
+
+    auto opt_entry = g_ctx.MBTB.at(this).check_hit({prev_ip, branch_target, type, prev_trans});
+
+    if (opt_entry.has_value()) {
+      if (branch_target != 0) opt_entry->target = branch_target;
+      opt_entry->type = type;
+    }
+
+    if (branch_target != 0) {
+      g_ctx.MBTB.at(this).fill(
+          opt_entry.value_or(mbtb_entry_t{prev_ip, branch_target, type, prev_trans})
+      );
+    }
   }
 
-  if (branch_target != 0) {
-    g_ctx.MBTB.at(this).fill(
-        opt_entry.value_or(mbtb_entry_t{prev_ip, branch_target, type, prev_trans})
-    );
-  }
 
-  // -----------------------------------------------------------------------
-  // SAS_TABLE write: if THIS branch is the post-return branch of an
-  // earlier call, record its (target, type) into SAS_TABLE keyed by that
-  // call's IP, so the next call to the same procedure can re-use it.
-  //
-  // This is the only piece of state that lets the SAS path improve over
-  // the baseline, and it lives in its own structure so it can never
-  // collide with MBTB entries used for normal predictions.
-  // -----------------------------------------------------------------------
-  if (prev_was_return && branch_target != 0) {
-    sas_record_t& slot = g_ctx.SAS_TABLE[this][pr_call_ip];
-    slot.target = branch_target;
-    slot.type   = type;
-    slot.valid  = true;
-    stats.sas_table_writes++;
-  }
 
   // -----------------------------------------------------------------------
   // Roll forward LAST_* state for the NEXT branch's prediction context.
