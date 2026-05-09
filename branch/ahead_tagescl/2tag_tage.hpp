@@ -29,7 +29,7 @@
 
 #include "utils.hpp"
 #include <cassert>
-#define SND_TAG_NO_PRED 32
+#define SND_TAG_NO_PRED 64
 #define AHEAD_SINGLE_BIMODAL 1
 
 namespace tagescl {
@@ -240,7 +240,7 @@ struct TageStats_2tag {
   uint64_t confidence_medium_wrong = 0;
   uint64_t confidence_low_correct = 0;
   uint64_t confidence_low_wrong = 0;
-  uint64_t tag2_counts[32] = {};
+  uint64_t tag2_counts[SND_TAG_NO_PRED] = {};
 
   void print(const char* name) const {
     std::cerr << "\n========== " << name << " STATISTICS ==========\n";
@@ -267,7 +267,7 @@ struct TageStats_2tag {
     std::cerr << "Low conf correct:         " << confidence_low_correct << "\n";
     std::cerr << "Low conf wrong:           " << confidence_low_wrong << "\n";
     std::cerr << "Tag2 value distribution:\n";
-    for (int i = 0; i < 32; ++i) {
+    for (int i = 0; i < SND_TAG_NO_PRED; ++i) {
       if (tag2_counts[i] > 0)
         std::cerr << "  tag2=" << i << ": " << tag2_counts[i] << "\n";
     }
