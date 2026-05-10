@@ -164,7 +164,7 @@ void Tage_SC_L<CONFIG>::commit_state(uint32_t branch_id, uint64_t br_pc,
 
     tage_.commit_state(prediction_info.tage.br_pc_used_for_pred_gen, resolve_dir,
                        prediction_info.tage, prediction_info.final_prediction,
-                       br_type.is_conditional);
+                       true);
   }
 }
 
