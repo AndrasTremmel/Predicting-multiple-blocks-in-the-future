@@ -243,6 +243,449 @@ constexpr int CONFIG_80KB::SC::THIRD_LOCAL_GEHL_HISTORIES::arr[];
 constexpr int CONFIG_80KB::SC::FIRST_IMLI_GEHL_HISTORIES::arr[];
 constexpr int CONFIG_80KB::SC::SECOND_IMLI_GEHL_HISTORIES::arr[];
 
+
+
+
+struct CONFIG_8KB {
+  // static constexpr bool PIPELINE_SUPPORT = true;
+  static constexpr bool USE_LOOP_PREDICTOR = false;
+  static constexpr bool USE_SC = false;
+  static constexpr int CONFIDENCE_COUNTER_WIDTH = 7;
+ 
+  struct TAGE {
+    static constexpr int MIN_HISTORY_SIZE = 6;
+    static constexpr int MAX_HISTORY_SIZE = 700;
+    static constexpr int NUM_HISTORIES = 12;
+    static constexpr int PATH_HISTORY_WIDTH = 27;
+    static constexpr int FIRST_LONG_HISTORY_TABLE = 4;
+    static constexpr int FIRST_2WAY_TABLE = 6;
+    static constexpr int LAST_2WAY_TABLE = 13;
+    static constexpr int SHORT_HISTORY_TAG_BITS = 8;
+    static constexpr int LONG_HISTORY_TAG_BITS = 12;
+    static constexpr int PRED_COUNTER_WIDTH = 3;
+    static constexpr int USEFUL_BITS = 1;
+    static constexpr int LOG_ENTRIES_PER_BANK = 9;
+    static constexpr int SHORT_HISTORY_NUM_BANKS = 4;
+    static constexpr int LONG_HISTORY_NUM_BANKS = 4;
+    static constexpr int EXTRA_ENTRIES_TO_ALLOCATE = 1;
+    static constexpr int TICKS_UNTIL_USEFUL_SHIFT = 1024;
+    static constexpr int ALT_SELECTOR_LOG_TABLE_SIZE = 4;
+    static constexpr int ALT_SELECTOR_ENTRY_WIDTH = 5;
+    static constexpr int BIMODAL_HYSTERESIS_SHIFT = 2;
+    static constexpr int BIMODAL_LOG_TABLES_SIZE = 12;
+  };
+ 
+  struct LOOP {
+    static constexpr int LOG_NUM_ENTRIES = 5;
+    static constexpr int ITERATION_COUNTER_WIDTH = 10;
+    static constexpr int TAG_BITS = 10;
+    static constexpr int CONFIDENCE_THRESHOLD = 15;
+  };
+ 
+  struct SC {
+    static constexpr int UPDATE_THRESHOLD_WIDTH = 12;
+    static constexpr int PERPC_UPDATE_THRESHOLD_WIDTH = 8;
+    static constexpr int INITIAL_UPDATE_THRESHOLD = 35 << 3;
+ 
+    static constexpr bool USE_VARIABLE_THRESHOLD = true;
+    static constexpr int LOG_SIZE_PERPC_THRESHOLD_TABLE =
+        USE_VARIABLE_THRESHOLD ? 6 : 0;
+    static constexpr int LOG_SIZE_VARIABLE_THRESHOLD_TABLE =
+        LOG_SIZE_PERPC_THRESHOLD_TABLE / 2;
+    static constexpr int VARIABLE_THRESHOLD_WIDTH = 6;
+    static constexpr int INITIAL_VARIABLE_THRESHOLD = 7;
+    static constexpr int INITIAL_VARIABLE_THRESHOLD_FOR_BIAS = 4;
+    static constexpr int LOG_BIAS_ENTRIES = 8;
+ 
+    static constexpr int LOG_SIZE_GLOBAL_HISTORY_GEHL = 10;
+    struct GLOBAL_HISTORY_GEHL_HISTORIES {
+      static constexpr int arr[] = {40, 24, 10};
+    };
+    static constexpr int LOG_SIZE_PATH_GEHL = 9;
+    struct PATH_GEHL_HISTORIES {
+      static constexpr int arr[] = {25, 16, 9};
+    };
+ 
+    static constexpr bool USE_LOCAL_HISTORY = true;
+    static constexpr int FIRST_LOCAL_HISTORY_LOG_TABLE_SIZE = 8;
+    static constexpr int FIRST_LOCAL_HISTORY_SHIFT = 2;
+    static constexpr int LOG_SIZE_FIRST_LOCAL_GEHL = 10;
+    struct FIRST_LOCAL_GEHL_HISTORIES {
+      static constexpr int arr[] = {11, 6, 3};
+    };
+ 
+    static constexpr bool USE_SECOND_LOCAL_HISTORY = true;
+    static constexpr int SECOND_LOCAL_HISTORY_LOG_TABLE_SIZE = 4;
+    static constexpr int SECOND_LOCAL_HISTORY_SHIFT = 5;
+    static constexpr int LOG_SIZE_SECOND_LOCAL_GEHL = 9;
+    struct SECOND_LOCAL_GEHL_HISTORIES {
+      static constexpr int arr[] = {16, 11, 6};
+    };
+ 
+    static constexpr bool USE_THIRD_LOCAL_HISTORY = true;
+    static constexpr int THIRD_LOCAL_HISTORY_LOG_TABLE_SIZE = 4;
+    static constexpr int THIRD_LOCAL_HISTORY_SHIFT = 10;
+    static constexpr int LOG_SIZE_THIRD_LOCAL_GEHL = 10;
+    struct THIRD_LOCAL_GEHL_HISTORIES {
+      static constexpr int arr[] = {9, 4};
+    };
+ 
+    static constexpr bool USE_IMLI = true;
+    static constexpr int IMLI_COUNTER_WIDTH = 8;
+    static constexpr int IMLI_TABLE_SIZE = 1 << IMLI_COUNTER_WIDTH;
+    static constexpr int log_size_first_imli_gehl = 8;
+    struct FIRST_IMLI_GEHL_HISTORIES {
+      static constexpr int arr[] = {IMLI_COUNTER_WIDTH};
+    };
+    static constexpr int LOG_SIZE_SECOND_IMLI_GEHL = 9;
+    struct SECOND_IMLI_GEHL_HISTORIES {
+      static constexpr int arr[] = {10, 4};
+    };
+ 
+    static constexpr int PRECISION = 4;
+    static constexpr int SC_PATH_HISTORY_WIDTH = 27;
+  };
+};
+ 
+constexpr int CONFIG_8KB::SC::GLOBAL_HISTORY_GEHL_HISTORIES::arr[];
+constexpr int CONFIG_8KB::SC::PATH_GEHL_HISTORIES::arr[];
+constexpr int CONFIG_8KB::SC::FIRST_LOCAL_GEHL_HISTORIES::arr[];
+constexpr int CONFIG_8KB::SC::SECOND_LOCAL_GEHL_HISTORIES::arr[];
+constexpr int CONFIG_8KB::SC::THIRD_LOCAL_GEHL_HISTORIES::arr[];
+constexpr int CONFIG_8KB::SC::FIRST_IMLI_GEHL_HISTORIES::arr[];
+constexpr int CONFIG_8KB::SC::SECOND_IMLI_GEHL_HISTORIES::arr[];
+ 
+/****************************************************************************************/
+struct CONFIG_16KB {
+  // static constexpr bool PIPELINE_SUPPORT = true;
+  static constexpr bool USE_LOOP_PREDICTOR = false;
+  static constexpr bool USE_SC = false;
+  static constexpr int CONFIDENCE_COUNTER_WIDTH = 7;
+ 
+  struct TAGE {
+    static constexpr int MIN_HISTORY_SIZE = 6;
+    static constexpr int MAX_HISTORY_SIZE = 1500;
+    static constexpr int NUM_HISTORIES = 15;
+    static constexpr int PATH_HISTORY_WIDTH = 27;
+    static constexpr int FIRST_LONG_HISTORY_TABLE = 5;
+    static constexpr int FIRST_2WAY_TABLE = 7;
+    static constexpr int LAST_2WAY_TABLE = 16;
+    static constexpr int SHORT_HISTORY_TAG_BITS = 8;
+    static constexpr int LONG_HISTORY_TAG_BITS = 12;
+    static constexpr int PRED_COUNTER_WIDTH = 3;
+    static constexpr int USEFUL_BITS = 1;
+    static constexpr int LOG_ENTRIES_PER_BANK = 10;
+    static constexpr int SHORT_HISTORY_NUM_BANKS = 4;
+    static constexpr int LONG_HISTORY_NUM_BANKS = 5;
+    static constexpr int EXTRA_ENTRIES_TO_ALLOCATE = 1;
+    static constexpr int TICKS_UNTIL_USEFUL_SHIFT = 1024;
+    static constexpr int ALT_SELECTOR_LOG_TABLE_SIZE = 4;
+    static constexpr int ALT_SELECTOR_ENTRY_WIDTH = 5;
+    static constexpr int BIMODAL_HYSTERESIS_SHIFT = 2;
+    static constexpr int BIMODAL_LOG_TABLES_SIZE = 12;
+  };
+ 
+  struct LOOP {
+    static constexpr int LOG_NUM_ENTRIES = 5;
+    static constexpr int ITERATION_COUNTER_WIDTH = 10;
+    static constexpr int TAG_BITS = 10;
+    static constexpr int CONFIDENCE_THRESHOLD = 15;
+  };
+ 
+  struct SC {
+    static constexpr int UPDATE_THRESHOLD_WIDTH = 12;
+    static constexpr int PERPC_UPDATE_THRESHOLD_WIDTH = 8;
+    static constexpr int INITIAL_UPDATE_THRESHOLD = 35 << 3;
+ 
+    static constexpr bool USE_VARIABLE_THRESHOLD = true;
+    static constexpr int LOG_SIZE_PERPC_THRESHOLD_TABLE =
+        USE_VARIABLE_THRESHOLD ? 6 : 0;
+    static constexpr int LOG_SIZE_VARIABLE_THRESHOLD_TABLE =
+        LOG_SIZE_PERPC_THRESHOLD_TABLE / 2;
+    static constexpr int VARIABLE_THRESHOLD_WIDTH = 6;
+    static constexpr int INITIAL_VARIABLE_THRESHOLD = 7;
+    static constexpr int INITIAL_VARIABLE_THRESHOLD_FOR_BIAS = 4;
+    static constexpr int LOG_BIAS_ENTRIES = 8;
+ 
+    static constexpr int LOG_SIZE_GLOBAL_HISTORY_GEHL = 10;
+    struct GLOBAL_HISTORY_GEHL_HISTORIES {
+      static constexpr int arr[] = {40, 24, 10};
+    };
+    static constexpr int LOG_SIZE_PATH_GEHL = 9;
+    struct PATH_GEHL_HISTORIES {
+      static constexpr int arr[] = {25, 16, 9};
+    };
+ 
+    static constexpr bool USE_LOCAL_HISTORY = true;
+    static constexpr int FIRST_LOCAL_HISTORY_LOG_TABLE_SIZE = 8;
+    static constexpr int FIRST_LOCAL_HISTORY_SHIFT = 2;
+    static constexpr int LOG_SIZE_FIRST_LOCAL_GEHL = 10;
+    struct FIRST_LOCAL_GEHL_HISTORIES {
+      static constexpr int arr[] = {11, 6, 3};
+    };
+ 
+    static constexpr bool USE_SECOND_LOCAL_HISTORY = true;
+    static constexpr int SECOND_LOCAL_HISTORY_LOG_TABLE_SIZE = 4;
+    static constexpr int SECOND_LOCAL_HISTORY_SHIFT = 5;
+    static constexpr int LOG_SIZE_SECOND_LOCAL_GEHL = 9;
+    struct SECOND_LOCAL_GEHL_HISTORIES {
+      static constexpr int arr[] = {16, 11, 6};
+    };
+ 
+    static constexpr bool USE_THIRD_LOCAL_HISTORY = true;
+    static constexpr int THIRD_LOCAL_HISTORY_LOG_TABLE_SIZE = 4;
+    static constexpr int THIRD_LOCAL_HISTORY_SHIFT = 10;
+    static constexpr int LOG_SIZE_THIRD_LOCAL_GEHL = 10;
+    struct THIRD_LOCAL_GEHL_HISTORIES {
+      static constexpr int arr[] = {9, 4};
+    };
+ 
+    static constexpr bool USE_IMLI = true;
+    static constexpr int IMLI_COUNTER_WIDTH = 8;
+    static constexpr int IMLI_TABLE_SIZE = 1 << IMLI_COUNTER_WIDTH;
+    static constexpr int log_size_first_imli_gehl = 8;
+    struct FIRST_IMLI_GEHL_HISTORIES {
+      static constexpr int arr[] = {IMLI_COUNTER_WIDTH};
+    };
+    static constexpr int LOG_SIZE_SECOND_IMLI_GEHL = 9;
+    struct SECOND_IMLI_GEHL_HISTORIES {
+      static constexpr int arr[] = {10, 4};
+    };
+ 
+    static constexpr int PRECISION = 5;
+    static constexpr int SC_PATH_HISTORY_WIDTH = 27;
+  };
+};
+ 
+constexpr int CONFIG_16KB::SC::GLOBAL_HISTORY_GEHL_HISTORIES::arr[];
+constexpr int CONFIG_16KB::SC::PATH_GEHL_HISTORIES::arr[];
+constexpr int CONFIG_16KB::SC::FIRST_LOCAL_GEHL_HISTORIES::arr[];
+constexpr int CONFIG_16KB::SC::SECOND_LOCAL_GEHL_HISTORIES::arr[];
+constexpr int CONFIG_16KB::SC::THIRD_LOCAL_GEHL_HISTORIES::arr[];
+constexpr int CONFIG_16KB::SC::FIRST_IMLI_GEHL_HISTORIES::arr[];
+constexpr int CONFIG_16KB::SC::SECOND_IMLI_GEHL_HISTORIES::arr[];
+ 
+/****************************************************************************************/
+struct CONFIG_32KB {
+  // static constexpr bool PIPELINE_SUPPORT = true;
+  static constexpr bool USE_LOOP_PREDICTOR = false;
+  static constexpr bool USE_SC = false;
+  static constexpr int CONFIDENCE_COUNTER_WIDTH = 7;
+ 
+  struct TAGE {
+    static constexpr int MIN_HISTORY_SIZE = 6;
+    static constexpr int MAX_HISTORY_SIZE = 2000;
+    static constexpr int NUM_HISTORIES = 18;
+    static constexpr int PATH_HISTORY_WIDTH = 27;
+    static constexpr int FIRST_LONG_HISTORY_TABLE = 6;
+    static constexpr int FIRST_2WAY_TABLE = 8;
+    static constexpr int LAST_2WAY_TABLE = 19;
+    static constexpr int SHORT_HISTORY_TAG_BITS = 8;
+    static constexpr int LONG_HISTORY_TAG_BITS = 12;
+    static constexpr int PRED_COUNTER_WIDTH = 3;
+    static constexpr int USEFUL_BITS = 1;
+    static constexpr int LOG_ENTRIES_PER_BANK = 10;
+    static constexpr int SHORT_HISTORY_NUM_BANKS = 6;
+    static constexpr int LONG_HISTORY_NUM_BANKS = 11;
+    static constexpr int EXTRA_ENTRIES_TO_ALLOCATE = 1;
+    static constexpr int TICKS_UNTIL_USEFUL_SHIFT = 1024;
+    static constexpr int ALT_SELECTOR_LOG_TABLE_SIZE = 4;
+    static constexpr int ALT_SELECTOR_ENTRY_WIDTH = 5;
+    static constexpr int BIMODAL_HYSTERESIS_SHIFT = 2;
+    static constexpr int BIMODAL_LOG_TABLES_SIZE = 13;
+  };
+ 
+  struct LOOP {
+    static constexpr int LOG_NUM_ENTRIES = 5;
+    static constexpr int ITERATION_COUNTER_WIDTH = 10;
+    static constexpr int TAG_BITS = 10;
+    static constexpr int CONFIDENCE_THRESHOLD = 15;
+  };
+ 
+  struct SC {
+    static constexpr int UPDATE_THRESHOLD_WIDTH = 12;
+    static constexpr int PERPC_UPDATE_THRESHOLD_WIDTH = 8;
+    static constexpr int INITIAL_UPDATE_THRESHOLD = 35 << 3;
+ 
+    static constexpr bool USE_VARIABLE_THRESHOLD = true;
+    static constexpr int LOG_SIZE_PERPC_THRESHOLD_TABLE =
+        USE_VARIABLE_THRESHOLD ? 6 : 0;
+    static constexpr int LOG_SIZE_VARIABLE_THRESHOLD_TABLE =
+        LOG_SIZE_PERPC_THRESHOLD_TABLE / 2;
+    static constexpr int VARIABLE_THRESHOLD_WIDTH = 6;
+    static constexpr int INITIAL_VARIABLE_THRESHOLD = 7;
+    static constexpr int INITIAL_VARIABLE_THRESHOLD_FOR_BIAS = 4;
+    static constexpr int LOG_BIAS_ENTRIES = 8;
+ 
+    static constexpr int LOG_SIZE_GLOBAL_HISTORY_GEHL = 10;
+    struct GLOBAL_HISTORY_GEHL_HISTORIES {
+      static constexpr int arr[] = {40, 24, 10};
+    };
+    static constexpr int LOG_SIZE_PATH_GEHL = 9;
+    struct PATH_GEHL_HISTORIES {
+      static constexpr int arr[] = {25, 16, 9};
+    };
+ 
+    static constexpr bool USE_LOCAL_HISTORY = true;
+    static constexpr int FIRST_LOCAL_HISTORY_LOG_TABLE_SIZE = 8;
+    static constexpr int FIRST_LOCAL_HISTORY_SHIFT = 2;
+    static constexpr int LOG_SIZE_FIRST_LOCAL_GEHL = 10;
+    struct FIRST_LOCAL_GEHL_HISTORIES {
+      static constexpr int arr[] = {11, 6, 3};
+    };
+ 
+    static constexpr bool USE_SECOND_LOCAL_HISTORY = true;
+    static constexpr int SECOND_LOCAL_HISTORY_LOG_TABLE_SIZE = 4;
+    static constexpr int SECOND_LOCAL_HISTORY_SHIFT = 5;
+    static constexpr int LOG_SIZE_SECOND_LOCAL_GEHL = 9;
+    struct SECOND_LOCAL_GEHL_HISTORIES {
+      static constexpr int arr[] = {16, 11, 6};
+    };
+ 
+    static constexpr bool USE_THIRD_LOCAL_HISTORY = true;
+    static constexpr int THIRD_LOCAL_HISTORY_LOG_TABLE_SIZE = 4;
+    static constexpr int THIRD_LOCAL_HISTORY_SHIFT = 10;
+    static constexpr int LOG_SIZE_THIRD_LOCAL_GEHL = 10;
+    struct THIRD_LOCAL_GEHL_HISTORIES {
+      static constexpr int arr[] = {9, 4};
+    };
+ 
+    static constexpr bool USE_IMLI = true;
+    static constexpr int IMLI_COUNTER_WIDTH = 8;
+    static constexpr int IMLI_TABLE_SIZE = 1 << IMLI_COUNTER_WIDTH;
+    static constexpr int log_size_first_imli_gehl = 8;
+    struct FIRST_IMLI_GEHL_HISTORIES {
+      static constexpr int arr[] = {IMLI_COUNTER_WIDTH};
+    };
+    static constexpr int LOG_SIZE_SECOND_IMLI_GEHL = 9;
+    struct SECOND_IMLI_GEHL_HISTORIES {
+      static constexpr int arr[] = {10, 4};
+    };
+ 
+    static constexpr int PRECISION = 5;
+    static constexpr int SC_PATH_HISTORY_WIDTH = 27;
+  };
+};
+ 
+constexpr int CONFIG_32KB::SC::GLOBAL_HISTORY_GEHL_HISTORIES::arr[];
+constexpr int CONFIG_32KB::SC::PATH_GEHL_HISTORIES::arr[];
+constexpr int CONFIG_32KB::SC::FIRST_LOCAL_GEHL_HISTORIES::arr[];
+constexpr int CONFIG_32KB::SC::SECOND_LOCAL_GEHL_HISTORIES::arr[];
+constexpr int CONFIG_32KB::SC::THIRD_LOCAL_GEHL_HISTORIES::arr[];
+constexpr int CONFIG_32KB::SC::FIRST_IMLI_GEHL_HISTORIES::arr[];
+constexpr int CONFIG_32KB::SC::SECOND_IMLI_GEHL_HISTORIES::arr[];
+ 
+/****************************************************************************************/
+struct CONFIG_128KB {
+  // static constexpr bool PIPELINE_SUPPORT = true;
+  static constexpr bool USE_LOOP_PREDICTOR = false;
+  static constexpr bool USE_SC = false;
+  static constexpr int CONFIDENCE_COUNTER_WIDTH = 7;
+ 
+  struct TAGE {
+    static constexpr int MIN_HISTORY_SIZE = 6;
+    static constexpr int MAX_HISTORY_SIZE = 3000;
+    static constexpr int NUM_HISTORIES = 22;
+    static constexpr int PATH_HISTORY_WIDTH = 27;
+    static constexpr int FIRST_LONG_HISTORY_TABLE = 8;
+    static constexpr int FIRST_2WAY_TABLE = 10;
+    static constexpr int LAST_2WAY_TABLE = 23;
+    static constexpr int SHORT_HISTORY_TAG_BITS = 8;
+    static constexpr int LONG_HISTORY_TAG_BITS = 12;
+    static constexpr int PRED_COUNTER_WIDTH = 3;
+    static constexpr int USEFUL_BITS = 1;
+    static constexpr int LOG_ENTRIES_PER_BANK = 11;
+    static constexpr int SHORT_HISTORY_NUM_BANKS = 15;
+    static constexpr int LONG_HISTORY_NUM_BANKS = 20;
+    static constexpr int EXTRA_ENTRIES_TO_ALLOCATE = 1;
+    static constexpr int TICKS_UNTIL_USEFUL_SHIFT = 1024;
+    static constexpr int ALT_SELECTOR_LOG_TABLE_SIZE = 4;
+    static constexpr int ALT_SELECTOR_ENTRY_WIDTH = 5;
+    static constexpr int BIMODAL_HYSTERESIS_SHIFT = 2;
+    static constexpr int BIMODAL_LOG_TABLES_SIZE = 14;
+  };
+ 
+  struct LOOP {
+    static constexpr int LOG_NUM_ENTRIES = 5;
+    static constexpr int ITERATION_COUNTER_WIDTH = 10;
+    static constexpr int TAG_BITS = 10;
+    static constexpr int CONFIDENCE_THRESHOLD = 15;
+  };
+ 
+  struct SC {
+    static constexpr int UPDATE_THRESHOLD_WIDTH = 12;
+    static constexpr int PERPC_UPDATE_THRESHOLD_WIDTH = 8;
+    static constexpr int INITIAL_UPDATE_THRESHOLD = 35 << 3;
+ 
+    static constexpr bool USE_VARIABLE_THRESHOLD = true;
+    static constexpr int LOG_SIZE_PERPC_THRESHOLD_TABLE =
+        USE_VARIABLE_THRESHOLD ? 6 : 0;
+    static constexpr int LOG_SIZE_VARIABLE_THRESHOLD_TABLE =
+        LOG_SIZE_PERPC_THRESHOLD_TABLE / 2;
+    static constexpr int VARIABLE_THRESHOLD_WIDTH = 6;
+    static constexpr int INITIAL_VARIABLE_THRESHOLD = 7;
+    static constexpr int INITIAL_VARIABLE_THRESHOLD_FOR_BIAS = 4;
+    static constexpr int LOG_BIAS_ENTRIES = 8;
+ 
+    static constexpr int LOG_SIZE_GLOBAL_HISTORY_GEHL = 10;
+    struct GLOBAL_HISTORY_GEHL_HISTORIES {
+      static constexpr int arr[] = {40, 24, 10};
+    };
+    static constexpr int LOG_SIZE_PATH_GEHL = 9;
+    struct PATH_GEHL_HISTORIES {
+      static constexpr int arr[] = {25, 16, 9};
+    };
+ 
+    static constexpr bool USE_LOCAL_HISTORY = true;
+    static constexpr int FIRST_LOCAL_HISTORY_LOG_TABLE_SIZE = 8;
+    static constexpr int FIRST_LOCAL_HISTORY_SHIFT = 2;
+    static constexpr int LOG_SIZE_FIRST_LOCAL_GEHL = 10;
+    struct FIRST_LOCAL_GEHL_HISTORIES {
+      static constexpr int arr[] = {11, 6, 3};
+    };
+ 
+    static constexpr bool USE_SECOND_LOCAL_HISTORY = true;
+    static constexpr int SECOND_LOCAL_HISTORY_LOG_TABLE_SIZE = 4;
+    static constexpr int SECOND_LOCAL_HISTORY_SHIFT = 5;
+    static constexpr int LOG_SIZE_SECOND_LOCAL_GEHL = 9;
+    struct SECOND_LOCAL_GEHL_HISTORIES {
+      static constexpr int arr[] = {16, 11, 6};
+    };
+ 
+    static constexpr bool USE_THIRD_LOCAL_HISTORY = true;
+    static constexpr int THIRD_LOCAL_HISTORY_LOG_TABLE_SIZE = 4;
+    static constexpr int THIRD_LOCAL_HISTORY_SHIFT = 10;
+    static constexpr int LOG_SIZE_THIRD_LOCAL_GEHL = 10;
+    struct THIRD_LOCAL_GEHL_HISTORIES {
+      static constexpr int arr[] = {9, 4};
+    };
+ 
+    static constexpr bool USE_IMLI = true;
+    static constexpr int IMLI_COUNTER_WIDTH = 8;
+    static constexpr int IMLI_TABLE_SIZE = 1 << IMLI_COUNTER_WIDTH;
+    static constexpr int log_size_first_imli_gehl = 8;
+    struct FIRST_IMLI_GEHL_HISTORIES {
+      static constexpr int arr[] = {IMLI_COUNTER_WIDTH};
+    };
+    static constexpr int LOG_SIZE_SECOND_IMLI_GEHL = 9;
+    struct SECOND_IMLI_GEHL_HISTORIES {
+      static constexpr int arr[] = {10, 4};
+    };
+ 
+    static constexpr int PRECISION = 9;
+    static constexpr int SC_PATH_HISTORY_WIDTH = 27;
+  };
+};
+ 
+constexpr int CONFIG_128KB::SC::GLOBAL_HISTORY_GEHL_HISTORIES::arr[];
+constexpr int CONFIG_128KB::SC::PATH_GEHL_HISTORIES::arr[];
+constexpr int CONFIG_128KB::SC::FIRST_LOCAL_GEHL_HISTORIES::arr[];
+constexpr int CONFIG_128KB::SC::SECOND_LOCAL_GEHL_HISTORIES::arr[];
+constexpr int CONFIG_128KB::SC::THIRD_LOCAL_GEHL_HISTORIES::arr[];
+constexpr int CONFIG_128KB::SC::FIRST_IMLI_GEHL_HISTORIES::arr[];
+constexpr int CONFIG_128KB::SC::SECOND_IMLI_GEHL_HISTORIES::arr[];
+ 
+
 }  // namespace tagescl
 
 #endif  // SPEC_TAGE_SC_L_TAGESCL_CONFIGS_HPP_
