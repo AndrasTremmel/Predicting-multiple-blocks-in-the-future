@@ -32,7 +32,7 @@
 typedef unsigned int uns;
 
 
-#define AHEAD_DISTANCE 10
+#define AHEAD_DISTANCE 11
 #define USE_2_BIT_COUNTER_IN_L0 1
 #define FFP_HASH_DIR 1      // used only when SND_TAG_NO_PRED = 2
 #define FFP_HASH_DIR_ONLY  0//((1 << AHEAD_DISTANCE) ==  SND_TAG_NO_PRED)    // use PC as well for missing history hash computation

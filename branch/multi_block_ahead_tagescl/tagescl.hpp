@@ -134,11 +134,6 @@ bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc) {
 
   if (prediction_info.tage_prediction_valid) {
     mb_stats_.ahead_predictions_valid++;
-    if (prediction_info.tage.br_pc_used_for_pred_gen == br_pc) {
-      mb_stats_.pc_match_predict_vs_commit++;
-    } else {
-      mb_stats_.pc_mismatch_predict_vs_commit++;
-    }
     return prediction_info.final_prediction;
   }
 

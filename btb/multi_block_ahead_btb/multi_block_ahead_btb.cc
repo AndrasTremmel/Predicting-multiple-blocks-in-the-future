@@ -1,16 +1,16 @@
-#include <cstdint>
-#include <map>
-#include <unordered_map>
+#include <algorithm>
 #include <array>
 #include <bitset>
-#include <deque>
-#include <algorithm>
-#include <utility>
+#include <cstdint>
 #include <cstdlib>
-#include <iostream>
-#include <iomanip>
+#include <deque>
 #include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <map>
 #include <sstream>
+#include <unordered_map>
+#include <utility>
 
 #include "msl/lru_table.h"
 #include "ooo_cpu.h"
@@ -25,11 +25,7 @@ enum class branch_info {
   CONDITIONAL,
 };
 
-enum class mbtb_transition : uint8_t {
-  T,
-  N,
-  R
-};
+enum class mbtb_transition : uint8_t { T, N, R };
 
 struct mbtb_entry_t {
   uint64_t ip_tag = 0;
@@ -37,11 +33,10 @@ struct mbtb_entry_t {
   branch_info type = branch_info::ALWAYS_TAKEN;
   mbtb_transition transition = mbtb_transition::N;
 
-  auto index() const { return ip_tag >> 2; }
-  auto tag() const { return (ip_tag >> 2) ^ static_cast<uint64_t>(transition); }
+  auto index() const { return ip_tag; }
+  auto tag() const { return (ip_tag) ^ static_cast<uint64_t>(transition); }
 };
 
-// Compact record for SAS data. Held inside the SAS deque (snapshots, captured at call time).
 struct sas_record_t {
   uint64_t target = 0;
   branch_info type = branch_info::ALWAYS_TAKEN;
@@ -56,10 +51,35 @@ struct pending_mbtb_pred_t {
   branch_info type;
   bool was_hit;
   bool ras_empty;
-  bool from_sas;        // true if prediction was sourced from PENDING_SAS_ENTRY
+  bool from_sas;
 };
 
+// -------- per-actual-type indexing (MIRRORS the baseline file) ------------
+constexpr int N_ACTUAL_TYPES = 7;
+static int actual_type_idx(uint8_t bt) {
+  switch (bt) {
+    case BRANCH_DIRECT_JUMP:   return 0;
+    case BRANCH_INDIRECT:      return 1;
+    case BRANCH_CONDITIONAL:   return 2;
+    case BRANCH_DIRECT_CALL:   return 3;
+    case BRANCH_INDIRECT_CALL: return 4;
+    case BRANCH_RETURN:        return 5;
+    default:                   return 6;
+  }
+}
+static const char* const ACTUAL_TYPE_NAMES[N_ACTUAL_TYPES] = {
+  "DIRECT_JUMP", "INDIRECT", "CONDITIONAL", "DIRECT_CALL",
+  "INDIRECT_CALL", "RETURN", "OTHER"
+};
+static branch_info expected_info(uint8_t bt) {
+  if (bt == BRANCH_INDIRECT || bt == BRANCH_INDIRECT_CALL) return branch_info::INDIRECT;
+  if (bt == BRANCH_RETURN)                                 return branch_info::RETURN;
+  if (bt == BRANCH_CONDITIONAL || bt == BRANCH_OTHER)      return branch_info::CONDITIONAL;
+  return branch_info::ALWAYS_TAKEN;
+}
+
 struct mbtb_stats_t {
+  // ============ LEGACY (preserved) ============
   uint64_t total_updates = 0;
   uint64_t taken_count = 0;
   uint64_t not_taken_count = 0;
@@ -83,21 +103,68 @@ struct mbtb_stats_t {
   uint64_t indirect_target_wrong = 0;
   uint64_t btb_target_correct = 0;
   uint64_t btb_target_wrong = 0;
-  uint64_t transition_hits[3] = {0,0,0};
+  uint64_t transition_hits[3]   = {0,0,0};
   uint64_t transition_misses[3] = {0,0,0};
   uint64_t prev_ip_match = 0;
   uint64_t prev_ip_mismatch = 0;
   uint64_t sas_pushes = 0;
   uint64_t sas_pops = 0;
   uint64_t sas_empty_on_pop = 0;
-  // SAS-prediction-specific stats:
-  uint64_t sas_push_valid = 0;          // call-time SAS entry lookup hit
-  uint64_t sas_push_invalid = 0;        // call-time SAS entry lookup miss
-  uint64_t sas_pred_used = 0;           // post-return branch fed from SAS
-  uint64_t sas_pred_fallback = 0;       // post-return branch fell back to MBTB
+  uint64_t sas_push_valid = 0;
+  uint64_t sas_push_invalid = 0;
+  uint64_t sas_pred_used = 0;
+  uint64_t sas_pred_fallback = 0;
   uint64_t sas_pred_target_correct = 0;
   uint64_t sas_pred_target_wrong = 0;
-  uint64_t sas_writes = 0;        // post-return branches recorded as SAS entries
+  uint64_t sas_writes = 0;
+
+  // ============ NEW: per-ACTUAL-type (matches baseline file) ============
+  uint64_t actual_total[N_ACTUAL_TYPES]               = {};
+  uint64_t actual_btb_hit[N_ACTUAL_TYPES]             = {};
+  uint64_t actual_btb_miss[N_ACTUAL_TYPES]            = {};
+  uint64_t actual_type_match[N_ACTUAL_TYPES]          = {};
+  uint64_t actual_type_mismatch[N_ACTUAL_TYPES]       = {};
+  uint64_t actual_target_correct[N_ACTUAL_TYPES]      = {};
+  uint64_t actual_target_wrong[N_ACTUAL_TYPES]        = {};
+  uint64_t actual_target_dontcare[N_ACTUAL_TYPES]     = {};
+  uint64_t spurious_target_wrong_from_misclassify[N_ACTUAL_TYPES] = {};
+
+  // POST-RETURN split
+  uint64_t pr_total = 0;
+  uint64_t pr_actual_total[N_ACTUAL_TYPES]            = {};
+  uint64_t pr_actual_btb_hit[N_ACTUAL_TYPES]          = {};
+  uint64_t pr_actual_target_correct[N_ACTUAL_TYPES]   = {};
+  uint64_t pr_actual_target_wrong[N_ACTUAL_TYPES]     = {};
+  uint64_t pr_actual_target_dontcare[N_ACTUAL_TYPES]  = {};
+
+  // NON-POST-RETURN split
+  uint64_t npr_total = 0;
+  uint64_t npr_actual_total[N_ACTUAL_TYPES]           = {};
+  uint64_t npr_actual_target_correct[N_ACTUAL_TYPES]  = {};
+  uint64_t npr_actual_target_wrong[N_ACTUAL_TYPES]    = {};
+  uint64_t npr_actual_target_dontcare[N_ACTUAL_TYPES] = {};
+
+  // ============ NEW: SAS-vs-MBTB attribution per ACTUAL type ============
+  // For every prediction where pred.from_sas was true:
+  uint64_t sas_served[N_ACTUAL_TYPES]                 = {};
+  uint64_t sas_served_target_correct[N_ACTUAL_TYPES]  = {};
+  uint64_t sas_served_target_wrong[N_ACTUAL_TYPES]    = {};
+  uint64_t sas_served_target_dontcare[N_ACTUAL_TYPES] = {};
+  uint64_t sas_served_type_match[N_ACTUAL_TYPES]      = {};
+  uint64_t sas_served_type_mismatch[N_ACTUAL_TYPES]   = {};
+
+  // Post-return predictions that fell through to MBTB (SAS invalid):
+  uint64_t fallback_served[N_ACTUAL_TYPES]                 = {};
+  uint64_t fallback_served_target_correct[N_ACTUAL_TYPES]  = {};
+  uint64_t fallback_served_target_wrong[N_ACTUAL_TYPES]    = {};
+  uint64_t fallback_served_target_dontcare[N_ACTUAL_TYPES] = {};
+
+  // Non-post-return predictions (always MBTB, never SAS) -- attribution
+  // of where their target accuracy is winning vs baseline.
+  uint64_t mbtb_normal[N_ACTUAL_TYPES]                 = {};
+  uint64_t mbtb_normal_target_correct[N_ACTUAL_TYPES]  = {};
+  uint64_t mbtb_normal_target_wrong[N_ACTUAL_TYPES]    = {};
+  uint64_t mbtb_normal_target_dontcare[N_ACTUAL_TYPES] = {};
 };
 
 constexpr std::size_t BTB_SET = 2048;
@@ -113,7 +180,7 @@ class MultiBlockBTBContext {
   std::map<O3_CPU*, std::array<uint64_t, BTB_INDIRECT_SIZE>> INDIRECT_BTB;
   std::map<O3_CPU*, std::bitset<champsim::lg2(BTB_INDIRECT_SIZE)>> CONDITIONAL_HISTORY;
   std::map<O3_CPU*, std::deque<uint64_t>> RAS;
-  std::map<O3_CPU*, std::deque<sas_record_t>> SAS;            // snapshots
+  std::map<O3_CPU*, std::deque<sas_record_t>> SAS;
   std::map<O3_CPU*, std::array<uint64_t, CALL_SIZE_TRACKERS>> CALL_SIZE;
   std::map<O3_CPU*, uint64_t> LAST_BRANCH_IP;
   std::map<O3_CPU*, mbtb_transition> LAST_TRANSITION;
@@ -121,68 +188,130 @@ class MultiBlockBTBContext {
   std::map<O3_CPU*, uint64_t> LAST_RETURN_CALL_IP;
   std::map<O3_CPU*, sas_record_t> PENDING_SAS_ENTRY;
   std::map<O3_CPU*, std::deque<pending_mbtb_pred_t>> PRED_QUEUE;
+  // Tracks the branch_type of the most recently UPDATED branch -- needed to
+  // classify each update as post-return for the new statistics.
+  std::map<O3_CPU*, uint8_t> LAST_BRANCH_TYPE_FOR_STATS;
+  std::map<O3_CPU*, bool>    HAS_LAST_BRANCH;
   std::map<O3_CPU*, mbtb_stats_t> STATS;
 
-  ~MultiBlockBTBContext() {
-    print_all();
+  ~MultiBlockBTBContext() { print_all(); }
+
+  static void print_per_type(std::ostream& os,
+                             const char* label,
+                             const uint64_t (&arr)[N_ACTUAL_TYPES]) {
+    os << "  " << label << ":";
+    for (int i = 0; i < N_ACTUAL_TYPES; ++i)
+      os << " " << ACTUAL_TYPE_NAMES[i] << "=" << arr[i];
+    os << "\n";
   }
 
   void print_all() {
-    auto out = [&](const std::string& s) {
-      std::cerr << s;
-    };
-
     for (auto& [cpu, stats] : STATS) {
       (void)cpu;
-      out("\n========== MULTI-BLOCK BTB STATISTICS ==========\n");
-      out("Branch updates:           " + std::to_string(stats.total_updates) + "\n");
-      out("Total hits:               " + std::to_string(stats.total_hits) + "\n");
-      out("Total misses:             " + std::to_string(stats.total_misses) + "\n");
-      if ((stats.total_hits + stats.total_misses) > 0) {
-        std::ostringstream oss;
-        oss << std::fixed << std::setprecision(4)
-            << (100.0 * stats.total_hits / (stats.total_hits + stats.total_misses));
-        out("Hit rate:                 " + oss.str() + "%\n");
-      }
-      out("Target correct:           " + std::to_string(stats.target_correct) + "\n");
-      out("Target wrong:             " + std::to_string(stats.target_wrong) + "\n");
-      out("Conditional hits:         " + std::to_string(stats.conditional_hits) + "\n");
-      out("Conditional misses:       " + std::to_string(stats.conditional_misses) + "\n");
-      out("Indirect hits:            " + std::to_string(stats.indirect_hits) + "\n");
-      out("Indirect misses:          " + std::to_string(stats.indirect_misses) + "\n");
-      out("Return hits:              " + std::to_string(stats.return_hits) + "\n");
-      out("Return misses:            " + std::to_string(stats.return_misses) + "\n");
-      out("Always taken hits:        " + std::to_string(stats.always_taken_hits) + "\n");
-      out("Always taken misses:      " + std::to_string(stats.always_taken_misses) + "\n");
-      out("RAS hits:                 " + std::to_string(stats.ras_hits) + "\n");
-      out("RAS misses:               " + std::to_string(stats.ras_misses) + "\n");
-      out("RAS target correct:       " + std::to_string(stats.ras_target_correct) + "\n");
-      out("RAS target wrong:         " + std::to_string(stats.ras_target_wrong) + "\n");
-      out("Indirect target correct:  " + std::to_string(stats.indirect_target_correct) + "\n");
-      out("Indirect target wrong:    " + std::to_string(stats.indirect_target_wrong) + "\n");
-      out("BTB target correct:       " + std::to_string(stats.btb_target_correct) + "\n");
-      out("BTB target wrong:         " + std::to_string(stats.btb_target_wrong) + "\n");
-      out("\n--- MBTB-specific diagnostics ---\n");
-      out("Transition hits T/N/R:    " + std::to_string(stats.transition_hits[0]) + " / "
-          + std::to_string(stats.transition_hits[1]) + " / " + std::to_string(stats.transition_hits[2]) + "\n");
-      out("Transition misses T/N/R:  " + std::to_string(stats.transition_misses[0]) + " / "
-          + std::to_string(stats.transition_misses[1]) + " / " + std::to_string(stats.transition_misses[2]) + "\n");
-      out("Prev IP match:            " + std::to_string(stats.prev_ip_match) + "\n");
-      out("Prev IP mismatch:         " + std::to_string(stats.prev_ip_mismatch) + "\n");
-      out("SAS pushes:               " + std::to_string(stats.sas_pushes) + "\n");
-      out("  ... valid snapshots:    " + std::to_string(stats.sas_push_valid) + "\n");
-      out("  ... invalid snapshots:  " + std::to_string(stats.sas_push_invalid) + "\n");
-      out("SAS pops:                 " + std::to_string(stats.sas_pops) + "\n");
-      out("SAS empty on pop:         " + std::to_string(stats.sas_empty_on_pop) + "\n");
-      out("\n--- SAS prediction (post-return branch) ---\n");
-      out("Post-return SAS used:     " + std::to_string(stats.sas_pred_used) + "\n");
-      out("Post-return MBTB fallback:" + std::to_string(stats.sas_pred_fallback) + "\n");
-      out("SAS pred target correct:  " + std::to_string(stats.sas_pred_target_correct) + "\n");
-      out("SAS pred target wrong:    " + std::to_string(stats.sas_pred_target_wrong) + "\n");
-      out("SAS entry writes:         " + std::to_string(stats.sas_writes) + "\n");
-      out("=================================================\n");
-    }
+      std::ostringstream oss;
+      oss << std::fixed << std::setprecision(4);
 
+      oss << "\n========== MULTI-BLOCK BTB STATISTICS ==========\n";
+      oss << "Branch updates:           " << stats.total_updates << "\n";
+      oss << "Total hits:               " << stats.total_hits << "\n";
+      oss << "Total misses:             " << stats.total_misses << "\n";
+      if ((stats.total_hits + stats.total_misses) > 0) {
+        oss << "Hit rate:                 "
+            << (100.0 * stats.total_hits / (stats.total_hits + stats.total_misses)) << "%\n";
+      }
+      oss << "Target correct:           " << stats.target_correct << "\n";
+      oss << "Target wrong:             " << stats.target_wrong << "\n";
+      if ((stats.target_correct + stats.target_wrong) > 0) {
+        oss << "Target accuracy:          "
+            << (100.0 * stats.target_correct / (stats.target_correct + stats.target_wrong)) << "%\n";
+      }
+      oss << "[legacy, hit=by-pred-type, miss=by-actual-type]\n";
+      oss << "Conditional hits:         " << stats.conditional_hits << "\n";
+      oss << "Conditional misses:       " << stats.conditional_misses << "\n";
+      oss << "Indirect hits:            " << stats.indirect_hits << "\n";
+      oss << "Indirect misses:          " << stats.indirect_misses << "\n";
+      oss << "Return hits:              " << stats.return_hits << "\n";
+      oss << "Return misses:            " << stats.return_misses << "\n";
+      oss << "Always taken hits:        " << stats.always_taken_hits << "\n";
+      oss << "Always taken misses:      " << stats.always_taken_misses << "\n";
+      oss << "RAS hits:                 " << stats.ras_hits << "\n";
+      oss << "RAS misses:               " << stats.ras_misses << "\n";
+      oss << "[legacy, target-* counters indexed by PREDICTED type]\n";
+      oss << "RAS target correct:       " << stats.ras_target_correct << "\n";
+      oss << "RAS target wrong:         " << stats.ras_target_wrong << "\n";
+      oss << "Indirect target correct:  " << stats.indirect_target_correct << "\n";
+      oss << "Indirect target wrong:    " << stats.indirect_target_wrong << "\n";
+      oss << "BTB target correct:       " << stats.btb_target_correct << "\n";
+      oss << "BTB target wrong:         " << stats.btb_target_wrong << "\n";
+
+      oss << "\n--- MBTB-specific diagnostics ---\n";
+      oss << "Transition hits T/N/R:    " << stats.transition_hits[0] << " / "
+          << stats.transition_hits[1] << " / " << stats.transition_hits[2] << "\n";
+      oss << "Transition misses T/N/R:  " << stats.transition_misses[0] << " / "
+          << stats.transition_misses[1] << " / " << stats.transition_misses[2] << "\n";
+      oss << "Prev IP match:            " << stats.prev_ip_match << "\n";
+      oss << "Prev IP mismatch:         " << stats.prev_ip_mismatch << "\n";
+      oss << "SAS pushes:               " << stats.sas_pushes << "\n";
+      oss << "  ... valid snapshots:    " << stats.sas_push_valid << "\n";
+      oss << "  ... invalid snapshots:  " << stats.sas_push_invalid << "\n";
+      oss << "SAS pops:                 " << stats.sas_pops << "\n";
+      oss << "SAS empty on pop:         " << stats.sas_empty_on_pop << "\n";
+      oss << "\n--- Legacy SAS prediction stats ---\n";
+      oss << "Post-return SAS used:     " << stats.sas_pred_used << "\n";
+      oss << "Post-return MBTB fallback:" << stats.sas_pred_fallback << "\n";
+      oss << "SAS pred target correct:  " << stats.sas_pred_target_correct << "\n";
+      oss << "SAS pred target wrong:    " << stats.sas_pred_target_wrong << "\n";
+      oss << "SAS entry writes:         " << stats.sas_writes << "\n";
+
+      oss << "\n--- Per-ACTUAL-type (matched with baseline file) ---\n";
+      print_per_type(oss, "actual_total                 ", stats.actual_total);
+      print_per_type(oss, "actual_btb_hit               ", stats.actual_btb_hit);
+      print_per_type(oss, "actual_btb_miss              ", stats.actual_btb_miss);
+      print_per_type(oss, "actual_type_match            ", stats.actual_type_match);
+      print_per_type(oss, "actual_type_mismatch         ", stats.actual_type_mismatch);
+      print_per_type(oss, "actual_target_correct        ", stats.actual_target_correct);
+      print_per_type(oss, "actual_target_wrong          ", stats.actual_target_wrong);
+      print_per_type(oss, "actual_target_dontcare       ", stats.actual_target_dontcare);
+      print_per_type(oss, "spurious_target_wrong_artif. ", stats.spurious_target_wrong_from_misclassify);
+
+      oss << "\n--- POST-RETURN branches only (matched with baseline file) ---\n";
+      oss << "  pr_total: " << stats.pr_total << "\n";
+      print_per_type(oss, "pr_actual_total              ", stats.pr_actual_total);
+      print_per_type(oss, "pr_actual_btb_hit            ", stats.pr_actual_btb_hit);
+      print_per_type(oss, "pr_actual_target_correct     ", stats.pr_actual_target_correct);
+      print_per_type(oss, "pr_actual_target_wrong       ", stats.pr_actual_target_wrong);
+      print_per_type(oss, "pr_actual_target_dontcare    ", stats.pr_actual_target_dontcare);
+
+      oss << "\n--- NON-POST-RETURN branches only (matched with baseline file) ---\n";
+      oss << "  npr_total: " << stats.npr_total << "\n";
+      print_per_type(oss, "npr_actual_total             ", stats.npr_actual_total);
+      print_per_type(oss, "npr_actual_target_correct    ", stats.npr_actual_target_correct);
+      print_per_type(oss, "npr_actual_target_wrong      ", stats.npr_actual_target_wrong);
+      print_per_type(oss, "npr_actual_target_dontcare   ", stats.npr_actual_target_dontcare);
+
+      oss << "\n--- SAS-served predictions (pred.from_sas == true) ---\n";
+      print_per_type(oss, "sas_served                   ", stats.sas_served);
+      print_per_type(oss, "sas_served_type_match        ", stats.sas_served_type_match);
+      print_per_type(oss, "sas_served_type_mismatch     ", stats.sas_served_type_mismatch);
+      print_per_type(oss, "sas_served_target_correct    ", stats.sas_served_target_correct);
+      print_per_type(oss, "sas_served_target_wrong      ", stats.sas_served_target_wrong);
+      print_per_type(oss, "sas_served_target_dontcare   ", stats.sas_served_target_dontcare);
+
+      oss << "\n--- Post-return predictions that FELL BACK to MBTB ---\n";
+      print_per_type(oss, "fallback_served              ", stats.fallback_served);
+      print_per_type(oss, "fallback_target_correct      ", stats.fallback_served_target_correct);
+      print_per_type(oss, "fallback_target_wrong        ", stats.fallback_served_target_wrong);
+      print_per_type(oss, "fallback_target_dontcare     ", stats.fallback_served_target_dontcare);
+
+      oss << "\n--- MBTB-normal (non-post-return, always MBTB) ---\n";
+      print_per_type(oss, "mbtb_normal                  ", stats.mbtb_normal);
+      print_per_type(oss, "mbtb_normal_target_correct   ", stats.mbtb_normal_target_correct);
+      print_per_type(oss, "mbtb_normal_target_wrong     ", stats.mbtb_normal_target_wrong);
+      print_per_type(oss, "mbtb_normal_target_dontcare  ", stats.mbtb_normal_target_dontcare);
+
+      oss << "=================================================\n";
+      std::cerr << oss.str();
+    }
     std::cerr << std::flush;
   }
 };
@@ -205,15 +334,20 @@ void O3_CPU::initialize_btb()
   g_ctx.RAS[this].clear();
   g_ctx.SAS[this].clear();
   g_ctx.PRED_QUEUE[this].clear();
+  g_ctx.LAST_BRANCH_TYPE_FOR_STATS[this] = 0;
+  g_ctx.HAS_LAST_BRANCH[this] = false;
   g_ctx.STATS[this] = {};
 }
 
 std::pair<uint64_t, uint8_t> O3_CPU::btb_prediction(uint64_t ip)
 {
   auto prev_ip   = g_ctx.LAST_BRANCH_IP[this];
-  auto trans     = g_ctx.LAST_TRANSITION[this] == mbtb_transition::R ? mbtb_transition::T : g_ctx.LAST_TRANSITION[this];
+  auto trans     = g_ctx.LAST_TRANSITION[this] == mbtb_transition::R
+                       ? mbtb_transition::T : g_ctx.LAST_TRANSITION[this];
   bool was_ret   = g_ctx.LAST_BRANCH_WAS_RETURN[this];
   auto& pend_sas = g_ctx.PENDING_SAS_ENTRY[this];
+  uint64_t pr_call_ip  = g_ctx.LAST_RETURN_CALL_IP[this];
+
 
   uint64_t predicted_target = 0;
   uint8_t  always_taken     = false;
@@ -222,16 +356,6 @@ std::pair<uint64_t, uint8_t> O3_CPU::btb_prediction(uint64_t ip)
   bool ras_empty            = false;
   bool from_sas             = false;
 
-  // -----------------------------------------------------------------------
-  // Source the prediction.
-  //   - For a post-return branch, prefer the SAS snapshot (call-site
-  //     specific). It directly describes the branch that follows the
-  //     return target, so it dodges the variable-target problem of keying
-  //     off the return's own IP.
-  //   - Otherwise (or if the SAS hint is invalid), fall through to the
-  //     normal (LAST_BRANCH_IP, LAST_TRANSITION) MBTB lookup -- byte
-  //     identical to the original implementation.
-  // -----------------------------------------------------------------------
   if (was_ret && pend_sas.valid) {
     was_hit = true;
     pred_type = pend_sas.type;
@@ -247,12 +371,8 @@ std::pair<uint64_t, uint8_t> O3_CPU::btb_prediction(uint64_t ip)
     }
   }
 
-  // -----------------------------------------------------------------------
-  // Apply the type-specific transformation regardless of source.
-  // -----------------------------------------------------------------------
   if (was_hit) {
     if (pred_type == branch_info::RETURN) {
-      // Peek RAS only -- the actual pop happens in update_btb().
       if (std::empty(g_ctx.RAS[this])) {
         ras_empty = true;
         predicted_target = 0;
@@ -264,18 +384,19 @@ std::pair<uint64_t, uint8_t> O3_CPU::btb_prediction(uint64_t ip)
         predicted_target = target + size;
         always_taken = true;
       }
-    }
-    else if (pred_type == branch_info::INDIRECT) {
+    } else if (pred_type == branch_info::INDIRECT) {
       // auto hash = (ip >> 2) ^ g_ctx.CONDITIONAL_HISTORY[this].to_ullong();
-      auto hash = ((prev_ip >> 2) ^ ((prev_ip >> 2) << (champsim::lg2(BTB_INDIRECT_SIZE) / 2)) 
-        ^ (static_cast<uint64_t>(trans) << (champsim::lg2(BTB_INDIRECT_SIZE) - 2)) ^ g_ctx.CONDITIONAL_HISTORY[this].to_ullong());
-      predicted_target = g_ctx.INDIRECT_BTB[this][hash % std::size(g_ctx.INDIRECT_BTB[this])];
+      auto hash = 0;
+      if (was_ret && pend_sas.valid) {
+        hash = (pr_call_ip) ^ g_ctx.CONDITIONAL_HISTORY[this].to_ullong(); // ^ static_cast<uint64_t>(mbtb_transition::R);
+      } else {
+        hash = ((prev_ip) ^ g_ctx.CONDITIONAL_HISTORY[this].to_ullong()); //^ static_cast<uint64_t>(trans);
+      }
+      predicted_target = g_ctx.INDIRECT_BTB[this][hash % std::size(g_ctx.INDIRECT_BTB[this])];      
       always_taken = true;
-    }
-    else if (pred_type == branch_info::CONDITIONAL) {
+    } else if (pred_type == branch_info::CONDITIONAL) {
       always_taken = false;
-    }
-    else {
+    } else {
       always_taken = true;
     }
   }
@@ -287,15 +408,15 @@ std::pair<uint64_t, uint8_t> O3_CPU::btb_prediction(uint64_t ip)
 
 void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint8_t branch_type)
 {
-  auto prev_ip    = g_ctx.LAST_BRANCH_IP[this];
-  auto prev_trans = g_ctx.LAST_TRANSITION[this];  
   auto& stats = g_ctx.STATS[this];
   stats.total_updates++;
   if (taken) stats.taken_count++; else stats.not_taken_count++;
 
-  // -----------------------------------------------------------------------
-  // Drain pending-prediction queue to find the prediction issued for THIS ip.
-  // -----------------------------------------------------------------------
+  // ---- Detect post-return using last-UPDATED branch type ----------------
+  bool is_post_return_for_stats = g_ctx.HAS_LAST_BRANCH[this] &&
+                                  (g_ctx.LAST_BRANCH_TYPE_FOR_STATS[this] == BRANCH_RETURN);
+
+  // ---- Drain PRED_QUEUE ------------------------------------------------
   auto& q = g_ctx.PRED_QUEUE[this];
   bool found = false;
   pending_mbtb_pred_t pred{};
@@ -305,35 +426,100 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
     if (pred.ip == ip) { found = true; break; }
   }
 
-  // Transition this branch produces toward its successor.
+  // Compute the transition this branch produces.
   mbtb_transition actual_trans;
   if (branch_type == BRANCH_DIRECT_CALL || branch_type == BRANCH_INDIRECT_CALL) {
     actual_trans = mbtb_transition::R;
-  }
-  else if (taken &&
-           branch_type != BRANCH_RETURN &&
-           branch_type != BRANCH_DIRECT_CALL &&
-           branch_type != BRANCH_INDIRECT_CALL) {
+  } else if (taken &&
+             branch_type != BRANCH_RETURN &&
+             branch_type != BRANCH_DIRECT_CALL &&
+             branch_type != BRANCH_INDIRECT_CALL) {
     actual_trans = mbtb_transition::T;
-  }
-  else {
+  } else {
     actual_trans = mbtb_transition::N;
   }
 
-  // Snapshot post-return-ness BEFORE we roll forward state.
   bool prev_was_return = g_ctx.LAST_BRANCH_WAS_RETURN[this];
   uint64_t pr_call_ip  = g_ctx.LAST_RETURN_CALL_IP[this];
 
-  // -----------------------------------------------------------------------
-  // Stats accounting.
-  // -----------------------------------------------------------------------
+  // ---- Per-actual-type accounting -------------------------------------
+  int ai = actual_type_idx(branch_type);
+  stats.actual_total[ai]++;
+  if (is_post_return_for_stats) {
+    stats.pr_total++;
+    stats.pr_actual_total[ai]++;
+  } else {
+    stats.npr_total++;
+    stats.npr_actual_total[ai]++;
+  }
+  branch_info expected = expected_info(branch_type);
+
+  if (found && pred.was_hit) {
+    stats.actual_btb_hit[ai]++;
+    if (is_post_return_for_stats) stats.pr_actual_btb_hit[ai]++;
+    if (pred.type == expected) stats.actual_type_match[ai]++;
+    else                       stats.actual_type_mismatch[ai]++;
+  } else {
+    stats.actual_btb_miss[ai]++;
+  }
+
+  bool true_target_used = taken || (branch_type != BRANCH_CONDITIONAL && branch_type != BRANCH_OTHER);
+
+  // Three-way attribution: SAS-served / fallback-served / mbtb-normal.
+  // pred.from_sas tells us the SAS path was used. If is_post_return_for_stats
+  // is true but pred.from_sas is false, this is a fallback (post-return that
+  // tried SAS but PENDING_SAS_ENTRY was invalid).
+  bool is_sas_served      = found && pred.from_sas;
+  bool is_fallback_served = found && !pred.from_sas && is_post_return_for_stats;
+  bool is_mbtb_normal     = found && !pred.from_sas && !is_post_return_for_stats;
+
+  if (!true_target_used) {
+    stats.actual_target_dontcare[ai]++;
+    if (is_post_return_for_stats) stats.pr_actual_target_dontcare[ai]++;
+    else                          stats.npr_actual_target_dontcare[ai]++;
+    if (is_sas_served)      stats.sas_served_target_dontcare[ai]++;
+    if (is_fallback_served) stats.fallback_served_target_dontcare[ai]++;
+    if (is_mbtb_normal)     stats.mbtb_normal_target_dontcare[ai]++;
+  } else {
+    bool tgt_ok = found && pred.was_hit && (pred.target == branch_target);
+    if (tgt_ok) {
+      stats.actual_target_correct[ai]++;
+      if (is_post_return_for_stats) stats.pr_actual_target_correct[ai]++;
+      else                          stats.npr_actual_target_correct[ai]++;
+      if (is_sas_served)      stats.sas_served_target_correct[ai]++;
+      if (is_fallback_served) stats.fallback_served_target_correct[ai]++;
+      if (is_mbtb_normal)     stats.mbtb_normal_target_correct[ai]++;
+    } else {
+      stats.actual_target_wrong[ai]++;
+      if (is_post_return_for_stats) stats.pr_actual_target_wrong[ai]++;
+      else                          stats.npr_actual_target_wrong[ai]++;
+      if (is_sas_served)      stats.sas_served_target_wrong[ai]++;
+      if (is_fallback_served) stats.fallback_served_target_wrong[ai]++;
+      if (is_mbtb_normal)     stats.mbtb_normal_target_wrong[ai]++;
+    }
+  }
+
+  if (is_sas_served) {
+    stats.sas_served[ai]++;
+    if (pred.type == expected) stats.sas_served_type_match[ai]++;
+    else                       stats.sas_served_type_mismatch[ai]++;
+  }
+  if (is_fallback_served) stats.fallback_served[ai]++;
+  if (is_mbtb_normal)     stats.mbtb_normal[ai]++;
+
+  if (found && pred.was_hit &&
+      (branch_type == BRANCH_CONDITIONAL || branch_type == BRANCH_OTHER) &&
+      !taken &&
+      pred.type != branch_info::CONDITIONAL) {
+    stats.spurious_target_wrong_from_misclassify[ai]++;
+  }
+
+  // ---- LEGACY accounting (preserved exactly from original file) --------
   if (found) {
     uint64_t actual_prev_ip = g_ctx.LAST_BRANCH_IP[this];
     if (pred.prev_ip == actual_prev_ip) stats.prev_ip_match++;
-    else stats.prev_ip_mismatch++;
+    else                                stats.prev_ip_mismatch++;
 
-
-    // SAS-path attribution for this prediction.
     if (prev_was_return) {
       if (pred.from_sas) stats.sas_pred_used++;
       else               stats.sas_pred_fallback++;
@@ -348,29 +534,27 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
         case branch_info::RETURN:      stats.return_hits++; break;
         default:                       stats.always_taken_hits++; break;
       }
-
       if (pred.type == branch_info::RETURN) {
         if (pred.ras_empty) stats.ras_misses++;
         else                stats.ras_hits++;
       }
-
       bool target_used = taken || (pred.type != branch_info::CONDITIONAL);
       if (target_used) {
         if (pred.target == branch_target) {
           stats.target_correct++;
           if (pred.from_sas) stats.sas_pred_target_correct++;
           switch (pred.type) {
-            case branch_info::RETURN:    stats.ras_target_correct++; break;
-            case branch_info::INDIRECT:  stats.indirect_target_correct++; break;
-            default:                     stats.btb_target_correct++; break;
+            case branch_info::RETURN:   stats.ras_target_correct++; break;
+            case branch_info::INDIRECT: stats.indirect_target_correct++; break;
+            default:                    stats.btb_target_correct++; break;
           }
         } else {
           stats.target_wrong++;
           if (pred.from_sas) stats.sas_pred_target_wrong++;
           switch (pred.type) {
-            case branch_info::RETURN:    stats.ras_target_wrong++; break;
-            case branch_info::INDIRECT:  stats.indirect_target_wrong++; break;
-            default:                     stats.btb_target_wrong++; break;
+            case branch_info::RETURN:   stats.ras_target_wrong++; break;
+            case branch_info::INDIRECT: stats.indirect_target_wrong++; break;
+            default:                    stats.btb_target_wrong++; break;
           }
         }
       }
@@ -398,9 +582,7 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
     }
   }
 
-  // -----------------------------------------------------------------------
-  // CALL: push call IP onto RAS, snapshot SAS_TABLE[call_ip] onto SAS.
-  // -----------------------------------------------------------------------
+  // ---- CALL: RAS + SAS push (UNCHANGED) --------------------------------
   if (branch_type == BRANCH_DIRECT_CALL || branch_type == BRANCH_INDIRECT_CALL) {
     g_ctx.RAS[this].push_back(ip);
 
@@ -408,8 +590,8 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
     auto entry = g_ctx.MBTB.at(this).check_hit({ip, 0, branch_info::ALWAYS_TAKEN, mbtb_transition::R});
     if (entry.has_value()) {
       snap.target = entry->target;
-      snap.type = entry->type;
-      snap.valid = true;
+      snap.type   = entry->type;
+      snap.valid  = true;
       stats.sas_push_valid++;
     } else {
       snap.valid = false;
@@ -423,10 +605,7 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
     if (std::size(g_ctx.SAS[this]) > SAS_SIZE) g_ctx.SAS[this].pop_front();
   }
 
-  // -----------------------------------------------------------------------
-  // RETURN: pop RAS, pop SAS into the popped_sas snapshot. The snapshot
-  // becomes PENDING_SAS_ENTRY (set further below) for the very next branch.
-  // -----------------------------------------------------------------------
+  // ---- RETURN: pop RAS + SAS (UNCHANGED) -------------------------------
   bool         just_handled_return = false;
   uint64_t     popped_call_ip      = 0;
   sas_record_t popped_sas{};
@@ -446,52 +625,44 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
 
     auto estimated_size = std::abs((long)(popped_call_ip - branch_target));
     if (estimated_size <= 10) {
-      g_ctx.CALL_SIZE[this][popped_call_ip % std::size(g_ctx.CALL_SIZE[this])]
-          = estimated_size;
+      g_ctx.CALL_SIZE[this][popped_call_ip % std::size(g_ctx.CALL_SIZE[this])] = estimated_size;
     }
 
     just_handled_return = true;
   }
 
-  // -----------------------------------------------------------------------
-  // Indirect-target table update -- UNCHANGED from baseline.
-  // -----------------------------------------------------------------------
+  // ---- Indirect target / history (UNCHANGED) ---------------------------
+  auto prev_ip    = g_ctx.LAST_BRANCH_IP[this];
+  auto prev_trans = g_ctx.LAST_TRANSITION[this];
+  auto& pend_sas = g_ctx.PENDING_SAS_ENTRY[this];
+
+
   if (branch_type == BRANCH_INDIRECT || branch_type == BRANCH_INDIRECT_CALL) {
     // auto hash = (ip >> 2) ^ g_ctx.CONDITIONAL_HISTORY[this].to_ullong();
-    auto hash = ((prev_ip >> 2) ^ ((prev_ip >> 2) << (champsim::lg2(BTB_INDIRECT_SIZE) / 2)) 
-      ^ (static_cast<uint64_t>(prev_trans) << (champsim::lg2(BTB_INDIRECT_SIZE) - 2)) ^ g_ctx.CONDITIONAL_HISTORY[this].to_ullong());
+    auto hash = 0;
+    if (prev_was_return && pend_sas.valid) {
+      hash = (pr_call_ip) ^ g_ctx.CONDITIONAL_HISTORY[this].to_ullong(); // ^ static_cast<uint64_t>(mbtb_transition::R);
+    } else {
+      hash = ((prev_ip) ^ g_ctx.CONDITIONAL_HISTORY[this].to_ullong()); //^ static_cast<uint64_t>(prev_trans);
+    }
     g_ctx.INDIRECT_BTB[this][hash % std::size(g_ctx.INDIRECT_BTB[this])]
         = branch_target;
   }
 
-  // -----------------------------------------------------------------------
-  // Conditional branch history register update -- UNCHANGED from baseline.
-  // -----------------------------------------------------------------------
+
+
   if (branch_type == BRANCH_CONDITIONAL || branch_type == BRANCH_OTHER) {
     g_ctx.CONDITIONAL_HISTORY[this] <<= 1;
     g_ctx.CONDITIONAL_HISTORY[this].set(0, taken);
   }
 
-  // -----------------------------------------------------------------------
-  // Resolve branch_info type.
-  // -----------------------------------------------------------------------
+  // ---- Resolve type ----------------------------------------------------
   auto type = branch_info::ALWAYS_TAKEN;
-  if (branch_type == BRANCH_INDIRECT || branch_type == BRANCH_INDIRECT_CALL)
-    type = branch_info::INDIRECT;
-  else if (branch_type == BRANCH_RETURN)
-    type = branch_info::RETURN;
-  else if (branch_type == BRANCH_CONDITIONAL || branch_type == BRANCH_OTHER)
-    type = branch_info::CONDITIONAL;
+  if (branch_type == BRANCH_INDIRECT || branch_type == BRANCH_INDIRECT_CALL) type = branch_info::INDIRECT;
+  else if (branch_type == BRANCH_RETURN)                                      type = branch_info::RETURN;
+  else if (branch_type == BRANCH_CONDITIONAL || branch_type == BRANCH_OTHER)  type = branch_info::CONDITIONAL;
 
-  // -----------------------------------------------------------------------
-  // MBTB write -- UNCHANGED from baseline.
-  //
-  // The post-return branch is written under (return_ip, N) just like any
-  // other branch. We do NOT redirect it to (call_ip, R), because that key
-  // is also used to predict the first branch INSIDE the procedure, and
-  // sharing the slot was the source of the regression.
-  // -----------------------------------------------------------------------
-
+  // ---- MBTB write (UNCHANGED) ------------------------------------------
   if (prev_was_return) {
     if (branch_target != 0) {
       auto opt_entry = g_ctx.MBTB.at(this).check_hit({pr_call_ip, branch_target, type, mbtb_transition::R});
@@ -499,32 +670,25 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
         opt_entry->target = branch_target;
         opt_entry->type = type;
       }
-
       g_ctx.MBTB.at(this).fill(opt_entry.value_or(mbtb_entry_t{pr_call_ip, branch_target, type, mbtb_transition::R}));
       stats.sas_writes++;
     }
   } else {
-    prev_trans = g_ctx.LAST_TRANSITION[this] == mbtb_transition::R ? mbtb_transition::T : g_ctx.LAST_TRANSITION[this];
+    prev_trans = g_ctx.LAST_TRANSITION[this] == mbtb_transition::R
+                     ? mbtb_transition::T : g_ctx.LAST_TRANSITION[this];
 
     auto opt_entry = g_ctx.MBTB.at(this).check_hit({prev_ip, branch_target, type, prev_trans});
-
     if (opt_entry.has_value()) {
       if (branch_target != 0) opt_entry->target = branch_target;
       opt_entry->type = type;
     }
-
     if (branch_target != 0) {
       g_ctx.MBTB.at(this).fill(
-          opt_entry.value_or(mbtb_entry_t{prev_ip, branch_target, type, prev_trans})
-      );
+          opt_entry.value_or(mbtb_entry_t{prev_ip, branch_target, type, prev_trans}));
     }
   }
 
-
-
-  // -----------------------------------------------------------------------
-  // Roll forward LAST_* state for the NEXT branch's prediction context.
-  // -----------------------------------------------------------------------
+  // ---- Roll forward state ----------------------------------------------
   g_ctx.LAST_BRANCH_IP[this]  = ip;
   g_ctx.LAST_TRANSITION[this] = actual_trans;
 
@@ -536,4 +700,7 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
     g_ctx.LAST_BRANCH_WAS_RETURN[this]  = false;
     g_ctx.PENDING_SAS_ENTRY[this].valid = false;
   }
+
+  g_ctx.LAST_BRANCH_TYPE_FOR_STATS[this] = branch_type;
+  g_ctx.HAS_LAST_BRANCH[this] = true;
 }

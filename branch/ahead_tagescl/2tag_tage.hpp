@@ -29,7 +29,7 @@
 
 #include "utils.hpp"
 #include <cassert>
-#define SND_TAG_NO_PRED 64
+#define SND_TAG_NO_PRED 32
 #define AHEAD_SINGLE_BIMODAL 1
 
 namespace tagescl {
