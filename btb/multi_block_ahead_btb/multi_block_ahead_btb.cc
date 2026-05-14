@@ -386,11 +386,11 @@ std::pair<uint64_t, uint8_t> O3_CPU::btb_prediction(uint64_t ip)
       }
     } else if (pred_type == branch_info::INDIRECT) {
       // auto hash = (ip >> 2) ^ g_ctx.CONDITIONAL_HISTORY[this].to_ullong();
-      auto hash = 0;
+      uint64_t hash = 0;
       if (was_ret && pend_sas.valid) {
-        hash = (pr_call_ip) ^ g_ctx.CONDITIONAL_HISTORY[this].to_ullong(); // ^ static_cast<uint64_t>(mbtb_transition::R);
+        hash = (pr_call_ip) ^ g_ctx.CONDITIONAL_HISTORY[this].to_ullong(); //^ static_cast<uint64_t>(mbtb_transition::R);
       } else {
-        hash = ((prev_ip) ^ g_ctx.CONDITIONAL_HISTORY[this].to_ullong()); //^ static_cast<uint64_t>(trans);
+        hash = ((prev_ip) ^ g_ctx.CONDITIONAL_HISTORY[this].to_ullong()); // ^ static_cast<uint64_t>(trans);
       }
       predicted_target = g_ctx.INDIRECT_BTB[this][hash % std::size(g_ctx.INDIRECT_BTB[this])];      
       always_taken = true;
@@ -633,15 +633,15 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
 
   // ---- Indirect target / history (UNCHANGED) ---------------------------
   auto prev_ip    = g_ctx.LAST_BRANCH_IP[this];
-  auto prev_trans = g_ctx.LAST_TRANSITION[this];
+  auto prev_trans = g_ctx.LAST_TRANSITION[this] == mbtb_transition::R ? mbtb_transition::T : g_ctx.LAST_TRANSITION[this];
   auto& pend_sas = g_ctx.PENDING_SAS_ENTRY[this];
 
 
   if (branch_type == BRANCH_INDIRECT || branch_type == BRANCH_INDIRECT_CALL) {
     // auto hash = (ip >> 2) ^ g_ctx.CONDITIONAL_HISTORY[this].to_ullong();
-    auto hash = 0;
+    uint64_t hash = 0;
     if (prev_was_return && pend_sas.valid) {
-      hash = (pr_call_ip) ^ g_ctx.CONDITIONAL_HISTORY[this].to_ullong(); // ^ static_cast<uint64_t>(mbtb_transition::R);
+      hash = (pr_call_ip) ^ g_ctx.CONDITIONAL_HISTORY[this].to_ullong(); //^ static_cast<uint64_t>(mbtb_transition::R);
     } else {
       hash = ((prev_ip) ^ g_ctx.CONDITIONAL_HISTORY[this].to_ullong()); //^ static_cast<uint64_t>(prev_trans);
     }
