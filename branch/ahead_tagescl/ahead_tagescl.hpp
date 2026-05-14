@@ -32,7 +32,7 @@
 typedef unsigned int uns;
 
 
-#define AHEAD_DISTANCE 11
+#define AHEAD_DISTANCE 10
 #define USE_2_BIT_COUNTER_IN_L0 1
 #define FFP_HASH_DIR 1      // used only when SND_TAG_NO_PRED = 2
 #define FFP_HASH_DIR_ONLY  0//((1 << AHEAD_DISTANCE) ==  SND_TAG_NO_PRED)    // use PC as well for missing history hash computation
@@ -245,7 +245,7 @@ uns Tage_SC_L<CONFIG>::get_recent_hist_hash(uint64_t br_pc) {
       break;
     }
     j++;
-    // res ^= (j * 0x9e3779b9u);   // SALT
+    res ^= (j * 0x9e3779b9u);   // SALT
     current = future_tage_response_delay_queue[i].br_npc;
 
 
@@ -278,14 +278,14 @@ uns Tage_SC_L<CONFIG>::get_recent_hist_hash(uint64_t br_pc) {
       else{
         assert(false);
       }
-      // res = (res + (res << 2) + j) & 0x03;
-      if(res & 0x02){
-        res = (res << 1) + 1;
-      }
-      else{
-        res = res << 1;
-      }
-      res = res & 0x03;
+      res = (res + (res << 2) + j) & 0x03;
+      // if(res & 0x02){
+      //   res = (res << 1) + 1;
+      // }
+      // else{
+      //   res = res << 1;
+      // }
+      // res = res & 0x03;
     }
     else if(SND_TAG_NO_PRED == 8){
       res = res ^ future_tage_response_delay_queue[i].current_pred;
@@ -316,14 +316,14 @@ uns Tage_SC_L<CONFIG>::get_recent_hist_hash(uint64_t br_pc) {
       else{
         assert(false);
       }
-      // res = (res + (res << 2) + j) & 0x07;
-      if(res & 0x04){
-        res = (res << 1) + 1;
-      }
-      else{
-        res = res << 1;
-      }
-      res = res & 0x07;
+      res = (res + (res << 2) + j) & 0x07;
+      // if(res & 0x04){
+      //   res = (res << 1) + 1;
+      // }
+      // else{
+      //   res = res << 1;
+      // }
+      // res = res & 0x07;
     }
     else if(SND_TAG_NO_PRED == 16){
       res = res ^ future_tage_response_delay_queue[i].current_pred;
@@ -334,7 +334,7 @@ uns Tage_SC_L<CONFIG>::get_recent_hist_hash(uint64_t br_pc) {
         res = res ^ current ^ (current >> 4);
       }
       else if(FFP_HASH_PC_BITS == 1){
-        res = res ^ (current >> 1) ^ (current >> 5);
+        res = res ^ (current >> 1) ^ (current >> 6);
       }
       else if(FFP_HASH_PC_BITS == 2){
         res = res ^ (current >> 2) ^ (current >> 6);
@@ -342,14 +342,14 @@ uns Tage_SC_L<CONFIG>::get_recent_hist_hash(uint64_t br_pc) {
       else{
         assert(false);
       }
-      // res = (res + (res << 2) + j) & 0x0f;
-      if(res & 0x08){
-        res = (res << 1) + 1;
-      }
-      else{
-        res = res << 1;
-      }
-      res = res & 0x0f;
+      res = (res + (res << 2) + j);
+      // if(res & 0x08){
+      //   res = (res << 1) + 1;
+      // }
+      // else{
+      //   res = res << 1;
+      // }
+      // res = res & 0x0f;
     }
     else if(SND_TAG_NO_PRED == 32){
       res = res ^ future_tage_response_delay_queue[i].current_pred;
@@ -369,14 +369,14 @@ uns Tage_SC_L<CONFIG>::get_recent_hist_hash(uint64_t br_pc) {
         assert(false);
       }
 
-      // res = (res + (res << 2) + j) & 0x01f;
-      if(res & 0x10){
-        res = (res << 1) + 1;
-      }
-      else{
-        res = res << 1;
-      }
-      res = res & 0x01f;
+      res = (res + (res << 2) + j);
+      // if(res & 0x10){
+      //   res = (res << 1) + 1;
+      // }
+      // else{
+      //   res = res << 1;
+      // }
+      // res = res & 0x01f;
     }
     else if(SND_TAG_NO_PRED == 64){
       res = res ^ future_tage_response_delay_queue[i].current_pred;
@@ -389,14 +389,14 @@ uns Tage_SC_L<CONFIG>::get_recent_hist_hash(uint64_t br_pc) {
       else{
         assert(false);
       }
-      // res = (res + (res << 2) + j) & 0x03f;
-      if(res & 0x20){
-        res = (res << 1) + 1;
-      }
-      else{
-        res = res << 1;
-      }
-      res = res & 0x03f;
+      res = (res + (res << 2) + j);
+      // if(res & 0x20){
+      //   res = (res << 1) + 1;
+      // }
+      // else{
+      //   res = res << 1;
+      // }
+      // res = res & 0x03f;
     }
     else if(SND_TAG_NO_PRED == 128){
       res = res ^ future_tage_response_delay_queue[i].current_pred;
@@ -404,19 +404,19 @@ uns Tage_SC_L<CONFIG>::get_recent_hist_hash(uint64_t br_pc) {
         assert(AHEAD_DISTANCE == 7);  
       }
       else if(FFP_HASH_PC_BITS == 1){
-        res = res ^ (current >> 1) ^ (current >> 8);
+        res = res ^ (current >> 1) ^ (current >> 6);
       }
       else{
         assert(false);
       }
-      // res = (res + (res << 2) + j) & 0x07f;
-      if(res & 0x40){
-        res = (res << 1) + 1;
-      }
-      else{
-        res = res << 1;
-      }
-      res = res & 0x07f;
+      res = (res + (res << 2) + j) & 0x07f;
+      // if(res & 0x40){
+      //   res = (res << 1) + 1;
+      // }
+      // else{
+      //   res = res << 1;
+      // }
+      // res = res & 0x07f;
     }
     else if(SND_TAG_NO_PRED == 256){
       res = res ^ future_tage_response_delay_queue[i].current_pred;
@@ -424,19 +424,19 @@ uns Tage_SC_L<CONFIG>::get_recent_hist_hash(uint64_t br_pc) {
         assert(AHEAD_DISTANCE == 8);  
       }
       else if(FFP_HASH_PC_BITS == 1){
-        res = res ^ (current >> 1) ^ (current >> 9);
+        res = res ^ (current >> 1) ^ (current >> 6);
       }
       else{
         assert(false);
       }
-      // res = (res + (res << 2) + j) & 0x0ff;
-      if(res & 0x80){
-        res = (res << 1) + 1;
-      }
-      else{
-        res = res << 1;
-      }
-      res = res & 0x0ff;
+      res = (res + (res << 2) + j) & 0x0ff;
+      // if(res & 0x80){
+      //   res = (res << 1) + 1;
+      // }
+      // else{
+      //   res = res << 1;
+      // }
+      // res = res & 0x0ff;
     }
     else if(SND_TAG_NO_PRED == 512){
       res = res ^ future_tage_response_delay_queue[i].current_pred;
@@ -449,14 +449,14 @@ uns Tage_SC_L<CONFIG>::get_recent_hist_hash(uint64_t br_pc) {
       else{
         assert(false);
       }
-      // res = (res + (res << 2) + j) & 0x1ff;
-      if(res & 0x100){
-        res = (res << 1) + 1;
-      }
-      else{
-        res = res << 1;
-      }
-      res = res & 0x1ff;
+      res = (res + (res << 2) + j) & 0x1ff;
+      // if(res & 0x100){
+      //   res = (res << 1) + 1;
+      // }
+      // else{
+      //   res = res << 1;
+      // }
+      // res = res & 0x1ff;
     }
     else if(SND_TAG_NO_PRED == 1024){
       res = res ^ future_tage_response_delay_queue[i].current_pred;
@@ -469,14 +469,14 @@ uns Tage_SC_L<CONFIG>::get_recent_hist_hash(uint64_t br_pc) {
       else{
         assert(false);
       }
-      // res = (res + (res << 2) + j) & 0x3ff;
-      if(res & 0x200){
-        res = (res << 1) + 1;
-      }
-      else{
-        res = res << 1;
-      }
-      res = res & 0x3ff;
+      res = (res + (res << 2) + j) & 0x3ff;
+      // if(res & 0x200){
+      //   res = (res << 1) + 1;
+      // }
+      // else{
+      //   res = res << 1;
+      // }
+      // res = res & 0x3ff;
     }
     else if(SND_TAG_NO_PRED == 2048){
       res = res ^ future_tage_response_delay_queue[i].current_pred;
@@ -489,14 +489,14 @@ uns Tage_SC_L<CONFIG>::get_recent_hist_hash(uint64_t br_pc) {
       else{
         assert(false);
       }
-      // res = (res + (res << 2) + j) & 0x7ff;
-      if(res & 0x400){
-        res = (res << 1) + 1;
-      }
-      else{
-        res = res << 1;
-      }
-      res = res & 0x7ff;
+      res = (res + (res << 2) + j) & 0x7ff;
+      // if(res & 0x400){
+      //   res = (res << 1) + 1;
+      // }
+      // else{
+      //   res = res << 1;
+      // }
+      // res = res & 0x7ff;
     }
     else if(SND_TAG_NO_PRED == 4096){
       res = res ^ future_tage_response_delay_queue[i].current_pred;
@@ -509,21 +509,21 @@ uns Tage_SC_L<CONFIG>::get_recent_hist_hash(uint64_t br_pc) {
       else{
         assert(false);
       }
-      // res = (res + (res << 2) + j) & 0xfff;
-      if(res & 0x800){
-        res = (res << 1) + 1;
-      }
-      else{
-        res = res << 1;
-      }
-      res = res & 0xfff;
+      res = (res + (res << 2) + j) & 0xfff;
+      // if(res & 0x800){
+      //   res = (res << 1) + 1;
+      // }
+      // else{
+      //   res = res << 1;
+      // }
+      // res = res & 0xfff;
     }
     else{
       assert(false);
     }
   }
   //std::cout << "Calculated missing history hash for branch pc " << br_pc << " is " << res << std::endl;
-  return res;
+  return res & (SND_TAG_NO_PRED - 1);
 }
 
 template <class CONFIG>
