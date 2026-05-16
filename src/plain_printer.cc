@@ -48,6 +48,30 @@ void champsim::plain_printer::print(O3_CPU::stats_type stats)
   fmt::print(stream, "Branch type MPKI\n");
   for (auto [str, idx] : types)
     fmt::print(stream, "{}: {:.3}\n", str, mpkis[idx]);
+
+  // === Fetch block statistics ===
+  fmt::print(stream, "{} Fetch Block Stats:\n", stats.name);
+
+  // Stat 1: (branches in block, ends with branch)
+  fmt::print(stream, "{}  Distribution by (branches, ends_with_branch):\n", stats.name);
+  for (const auto& [key, count] : stats.fetch_block_branch_distribution) {
+    fmt::print(stream, "{}    branches: {:2d}  ends_with_branch: {}  count: {:10d}\n",
+               stats.name, key.first, key.second ? "yes" : " no", count);
+  }
+
+  // Stat 2: actual fetch block sizes
+  fmt::print(stream, "{}  Actual fetch block size distribution:\n", stats.name);
+  for (const auto& [size, count] : stats.fetch_block_size_distribution) {
+    fmt::print(stream, "{}    size: {:2d}  count: {:10d}\n", stats.name, size, count);
+  }
+
+  // Stat 3: hypothetical fetch block sizes (cut at any branch or FETCH_WIDTH)
+  fmt::print(stream, "{}  Hypothetical block size distribution (cut at any branch or FETCH_WIDTH):\n", stats.name);
+  for (const auto& [size, count] : stats.hypothetical_block_size_distribution) {
+    fmt::print(stream, "{}    size: {:2d}  count: {:10d}\n", stats.name, size, count);
+  }
+
+  
   fmt::print(stream, "\n");
 }
 
