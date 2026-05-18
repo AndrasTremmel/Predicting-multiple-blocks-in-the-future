@@ -154,9 +154,14 @@ public:
   // branch
   uint64_t fetch_resume_cycle = 0;
 
-  // Persistent counter for Stat 3 (hypothetical fetch block length).
-  // Survives across cycles; only reset on any branch or hitting FETCH_WIDTH.
-  uint64_t hypothetical_block_counter = 0;
+  // Persistent fetch-block counters. Both survive across cycles so neither is
+  // fragmented by IFETCH_BUFFER back-pressure; they differ only in their cut rule.
+  //   - actual_*  : cut on TAKEN branch or FETCH_WIDTH
+  //   - hypothetical_block_counter : cut on ANY branch or FETCH_WIDTH
+  uint64_t actual_block_size_counter     = 0;
+  uint64_t actual_block_branches_counter = 0;
+  bool     actual_block_last_was_branch  = false;
+  uint64_t hypothetical_block_counter    = 0;
 
   const long IN_QUEUE_SIZE = 2 * FETCH_WIDTH;
   std::deque<ooo_model_instr> input_queue;
