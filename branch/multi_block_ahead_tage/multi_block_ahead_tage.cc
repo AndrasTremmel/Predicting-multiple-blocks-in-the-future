@@ -5,7 +5,7 @@
 #include <fstream>
 #include <sstream>
 #include "ooo_cpu.h"
-#include "tagescl.hpp"
+#include "tage_wrapper.hpp"
 
 struct ChampsimTageScl {
   using Impl = tagescl::Tage_SC_L<tagescl::CONFIG_64KB>;

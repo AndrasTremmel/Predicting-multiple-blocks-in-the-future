@@ -4,7 +4,7 @@
 #define SPEC_TAGE_SC_L_TAGESCL_HPP_
 
 #include "tage.hpp"
-#include "tagescl_configs.hpp"
+#include "tage_configs.hpp"
 #include "utils.hpp"
 
 #define MULTI_BLOCK_AHEAD_DISTANCE 1
