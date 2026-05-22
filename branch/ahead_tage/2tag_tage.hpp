@@ -24,10 +24,12 @@
 
 #include <cmath>
 #include <vector>
+#include <iostream>
+#include <iomanip>
 
 #include "utils.hpp"
 #include <cassert>
-#define SND_TAG_NO_PRED 32
+#define SND_TAG_NO_PRED 256
 #define AHEAD_SINGLE_BIMODAL 1
 
 namespace tagescl {
@@ -213,6 +215,72 @@ struct Matched_Table_Banks_2tag {
   int alt_bank;
 };
 
+struct TageStats_2tag {
+  uint64_t total_predictions = 0;
+  uint64_t total_mispredictions = 0;
+  uint64_t bimodal_used = 0;
+  uint64_t bimodal_mispredictions = 0;
+  uint64_t tagged_used = 0;
+  uint64_t tagged_mispredictions = 0;
+  uint64_t longest_match_correct = 0;
+  uint64_t longest_match_wrong = 0;
+  uint64_t alt_prediction_used = 0;
+  uint64_t alt_prediction_correct = 0;
+  uint64_t alt_prediction_wrong = 0;
+  uint64_t weak_longest_correct = 0;
+  uint64_t weak_longest_wrong = 0;
+  uint64_t new_entries_allocated = 0;
+  uint64_t alt_selector_mispredictions = 0;
+  uint64_t history_rewinds = 0;
+  uint64_t commits = 0;
+  uint64_t bank_hits[45] = {};
+  uint64_t confidence_high_correct = 0;
+  uint64_t confidence_high_wrong = 0;
+  uint64_t confidence_medium_correct = 0;
+  uint64_t confidence_medium_wrong = 0;
+  uint64_t confidence_low_correct = 0;
+  uint64_t confidence_low_wrong = 0;
+  uint64_t tag2_counts[SND_TAG_NO_PRED] = {};
+
+  void print(const char* name) const {
+    std::cerr << "\n========== " << name << " STATISTICS ==========\n";
+    std::cerr << "Total predictions:        " << total_predictions << "\n";
+    std::cerr << "Total mispredictions:     " << total_mispredictions << "\n";
+    if (total_predictions > 0)
+      std::cerr << "Misprediction rate:       " << std::fixed << std::setprecision(6)
+                << (100.0 * total_mispredictions / total_predictions) << "%\n";
+    std::cerr << "Bimodal used:             " << bimodal_used << "\n";
+    std::cerr << "Bimodal mispredictions:   " << bimodal_mispredictions << "\n";
+    std::cerr << "Tagged used:              " << tagged_used << "\n";
+    std::cerr << "Tagged mispredictions:    " << tagged_mispredictions << "\n";
+    std::cerr << "Longest match correct:    " << longest_match_correct << "\n";
+    std::cerr << "Longest match wrong:      " << longest_match_wrong << "\n";
+    std::cerr << "Alt used correct:         " << alt_prediction_correct << "\n";
+    std::cerr << "Alt used wrong:           " << alt_prediction_wrong << "\n";
+    std::cerr << "Weak longest correct:     " << weak_longest_correct << "\n";
+    std::cerr << "Weak longest wrong:       " << weak_longest_wrong << "\n";
+    std::cerr << "New entries allocated:    " << new_entries_allocated << "\n";
+    std::cerr << "High conf correct:        " << confidence_high_correct << "\n";
+    std::cerr << "High conf wrong:          " << confidence_high_wrong << "\n";
+    std::cerr << "Medium conf correct:      " << confidence_medium_correct << "\n";
+    std::cerr << "Medium conf wrong:        " << confidence_medium_wrong << "\n";
+    std::cerr << "Low conf correct:         " << confidence_low_correct << "\n";
+    std::cerr << "Low conf wrong:           " << confidence_low_wrong << "\n";
+    std::cerr << "Tag2 value distribution:\n";
+    for (int i = 0; i < SND_TAG_NO_PRED; ++i) {
+      if (tag2_counts[i] > 0)
+        std::cerr << "  tag2=" << i << ": " << tag2_counts[i] << "\n";
+    }
+    std::cerr << "Bank hit distribution:\n";
+    for (int i = 1; i < 45; ++i) {
+      if (bank_hits[i] > 0)
+        std::cerr << "  Bank " << i << ": " << bank_hits[i] << "\n";
+    }
+    std::cerr << "=============================================\n";
+    std::cerr << std::flush;
+  }
+};
+
 template <class TAGE_CONFIG>
 struct Tage_Prediction_Info_2tag {
   // Overal prediction and confidence.
@@ -238,6 +306,7 @@ struct Tage_Prediction_Info_2tag {
   int64_t path_history_commit_checkpoint;
   int tag2;
   bool final_prediction;
+  uint64_t br_pc_used_for_pred_gen = 0;
 };
 
 template <class TAGE_CONFIG>
@@ -411,6 +480,8 @@ class Tage_2tag{
                     int                                      tag_2) {
     assert(tag_2 < SND_TAG_NO_PRED);
 
+    bool longest_was_weak = false;
+
     const int* indices = prediction_info.indices;
     const int* tags    = prediction_info.tags;
 
@@ -451,6 +522,8 @@ class Tage_2tag{
 
           alt_selector_table_[alt_selector_table_index].update(
             prediction_info.alt_prediction[tag_2] == resolve_dir);
+          if(prediction_info.alt_prediction[tag_2] != resolve_dir)
+            stats_.alt_selector_mispredictions++;
         }
       }
     }
@@ -481,7 +554,15 @@ class Tage_2tag{
         if(tables_enabled_.arr[i]) {
           Tagged_Entry& bank_entry = tagged_table_ptrs_[i][indices[i]];
           if(bank_entry.useful.get() == 0) {
-            if(std::abs(2 * bank_entry.pred_counter.get() + 1) <= 3) {
+
+            // *** PROMOTION CHECK ***
+            // Same ahead history (primary tag match) but different missing-history
+            // pattern (secondary tag mismatch): do NOT overwrite. Treat this slot
+            // as occupied and let the loop promote to a higher-history table.
+            if(bank_entry.tag == tags[i] && bank_entry.tag_2 != tag_2) {
+                // fall through to try the sibling bank below
+            }
+            else if(std::abs(2 * bank_entry.pred_counter.get() + 1) <= 3) {
               bank_entry.tag = tags[i];
               bank_entry.tag_2 = tag_2;
               bank_entry.pred_counter.set(resolve_dir ? 0 : -1);
@@ -514,7 +595,14 @@ class Tage_2tag{
             Tagged_Entry& bank_entry = tagged_table_ptrs_[i][indices[i]];
 
             if(bank_entry.useful.get() == 0) {
-              if(std::abs(2 * bank_entry.pred_counter.get() + 1) <= 3) {
+              // *** PROMOTION CHECK ***
+              // Same ahead history (primary tag match) but different missing-history
+              // pattern (secondary tag mismatch): do NOT overwrite. Treat this slot
+              // as occupied and let the loop promote to a higher-history table.
+              if(bank_entry.tag == tags[i] && bank_entry.tag_2 != tag_2) {
+                  // fall through to try the sibling bank below
+              }
+              else if(std::abs(2 * bank_entry.pred_counter.get() + 1) <= 3) {
                 bank_entry.tag = tags[i];
                 bank_entry.tag_2 = tag_2;
                 bank_entry.pred_counter.set(resolve_dir ? 0 : -1);
@@ -539,6 +627,7 @@ class Tage_2tag{
         }
       }
 
+      stats_.new_entries_allocated += num_allocated;
       tick_ += (tick_penalty - 2 * num_allocated);
       tick_ = std::max(tick_, 0);
       if(tick_ >= TAGE_CONFIG::TICKS_UNTIL_USEFUL_SHIFT) {
@@ -558,6 +647,7 @@ class Tage_2tag{
         tagged_table_ptrs_[prediction_info.hit_bank[tag_2]]
                           [indices[prediction_info.hit_bank[tag_2]]];
       if(std::abs(2 * matched_entry.pred_counter.get() + 1) == 1) {
+        longest_was_weak = true;
         if(prediction_info.longest_match_prediction[tag_2] !=
            resolve_dir) {  // acts as a protection
           if(prediction_info.alt_bank[tag_2] > 0) {
@@ -599,6 +689,57 @@ class Tage_2tag{
                           [indices[prediction_info.hit_bank[tag_2]]];
       matched_entry.useful.increment();
     }
+
+    // ---- Statistics ----
+    stats_.commits++;
+    stats_.total_predictions++;
+    stats_.tag2_counts[tag_2]++;
+    bool correct = (final_prediction == resolve_dir);
+    if (!correct) stats_.total_mispredictions++;
+
+    if (prediction_info.hit_bank[tag_2] == 0) {
+      stats_.bimodal_used++;
+      if (!correct) stats_.bimodal_mispredictions++;
+    } else {
+      stats_.tagged_used++;
+      stats_.bank_hits[prediction_info.hit_bank[tag_2]]++;
+      if (prediction_info.alt_bank[tag_2] != 0)
+        stats_.bank_hits[prediction_info.alt_bank[tag_2]]++;
+
+      if (!correct) stats_.tagged_mispredictions++;
+
+      if (prediction_info.longest_match_prediction[tag_2] == resolve_dir)
+        stats_.longest_match_correct++;
+      else
+        stats_.longest_match_wrong++;
+
+      if (longest_was_weak) {
+        if (prediction_info.longest_match_prediction[tag_2] == resolve_dir)
+          stats_.weak_longest_correct++;
+        else
+          stats_.weak_longest_wrong++;
+      }
+
+      bool used_alt = (prediction_info.prediction[tag_2] != prediction_info.longest_match_prediction[tag_2]);
+      if (used_alt) {
+        stats_.alt_prediction_used++;
+        if (prediction_info.prediction[tag_2] == resolve_dir)
+          stats_.alt_prediction_correct++;
+        else
+          stats_.alt_prediction_wrong++;
+      }
+
+      if (prediction_info.high_confidence[tag_2]) {
+        if (correct) stats_.confidence_high_correct++;
+        else stats_.confidence_high_wrong++;
+      } else if (prediction_info.medium_confidence[tag_2]) {
+        if (correct) stats_.confidence_medium_correct++;
+        else stats_.confidence_medium_wrong++;
+      } else {
+        if (correct) stats_.confidence_low_correct++;
+        else stats_.confidence_low_wrong++;
+      }
+    }
   }
 
   void commit_state_at_retire(
@@ -609,6 +750,7 @@ class Tage_2tag{
 
   void global_recover_speculative_state(
     const Tage_Prediction_Info_2tag<TAGE_CONFIG>& prediction_info) {
+    stats_.history_rewinds++;
     int64_t num_flushed_bits =
       (prediction_info.global_history_head_checkpoint_ -
        tage_histories_.history_register_.head_idx());
@@ -632,6 +774,12 @@ class Tage_2tag{
   static void build_empty_prediction(
     Tage_Prediction_Info_2tag<TAGE_CONFIG>* prediction_info) {
     *prediction_info = {};
+  }
+
+  const TageStats_2tag& get_stats() const { return stats_; }
+
+  ~Tage_2tag() {
+    stats_.print("2TAG_TAGE_CORE");
   }
 
  private:
@@ -689,6 +837,8 @@ class Tage_2tag{
   Saturating_Counter<TAGE_CONFIG::ALT_SELECTOR_ENTRY_WIDTH, true>
       alt_selector_table_[1 << TAGE_CONFIG::ALT_SELECTOR_LOG_TABLE_SIZE];
   int tick_;  // for resetting the useful bits
+
+  mutable TageStats_2tag stats_;
 
   Random_Number_Generator& random_number_gen_;
 };

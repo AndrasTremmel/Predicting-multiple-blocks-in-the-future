@@ -26,8 +26,8 @@ namespace tagescl {
 
 struct CONFIG_64KB {
   // static constexpr bool PIPELINE_SUPPORT = true;
-  static constexpr bool USE_LOOP_PREDICTOR = true;
-  static constexpr bool USE_SC = true;
+  static constexpr bool USE_LOOP_PREDICTOR = false;
+  static constexpr bool USE_SC = false;
   static constexpr int CONFIDENCE_COUNTER_WIDTH = 7;
 
   struct TAGE {
@@ -136,16 +136,16 @@ constexpr int CONFIG_64KB::SC::SECOND_IMLI_GEHL_HISTORIES::arr[];
 /****************************************************************************************/
 struct CONFIG_80KB {
   // static constexpr bool PIPELINE_SUPPORT = true;
-  static constexpr bool USE_LOOP_PREDICTOR = true;
-  static constexpr bool USE_SC = true;
+  static constexpr bool USE_LOOP_PREDICTOR = false;
+  static constexpr bool USE_SC = false;
   static constexpr int CONFIDENCE_COUNTER_WIDTH = 7;
 
   struct TAGE {
     static constexpr int MIN_HISTORY_SIZE = 6;
     static constexpr int MAX_HISTORY_SIZE = 3000;
-    static constexpr int NUM_HISTORIES = 18;
+    static constexpr int NUM_HISTORIES = 21;
     static constexpr int PATH_HISTORY_WIDTH = 27;
-    static constexpr int FIRST_LONG_HISTORY_TABLE = 13;
+    static constexpr int FIRST_LONG_HISTORY_TABLE = 7;
     static constexpr int FIRST_2WAY_TABLE = 9;
     static constexpr int LAST_2WAY_TABLE = 22;
     static constexpr int SHORT_HISTORY_TAG_BITS = 8;
@@ -245,11 +245,10 @@ constexpr int CONFIG_80KB::SC::SECOND_IMLI_GEHL_HISTORIES::arr[];
 
 
 
-
 struct CONFIG_8KB {
   // static constexpr bool PIPELINE_SUPPORT = true;
-  static constexpr bool USE_LOOP_PREDICTOR = true;
-  static constexpr bool USE_SC = true;
+  static constexpr bool USE_LOOP_PREDICTOR = false;
+  static constexpr bool USE_SC = false;
   static constexpr int CONFIDENCE_COUNTER_WIDTH = 7;
  
   struct TAGE {
@@ -358,8 +357,8 @@ constexpr int CONFIG_8KB::SC::SECOND_IMLI_GEHL_HISTORIES::arr[];
 /****************************************************************************************/
 struct CONFIG_16KB {
   // static constexpr bool PIPELINE_SUPPORT = true;
-  static constexpr bool USE_LOOP_PREDICTOR = true;
-  static constexpr bool USE_SC = true;
+  static constexpr bool USE_LOOP_PREDICTOR = false;
+  static constexpr bool USE_SC = false;
   static constexpr int CONFIDENCE_COUNTER_WIDTH = 7;
  
   struct TAGE {
@@ -468,8 +467,8 @@ constexpr int CONFIG_16KB::SC::SECOND_IMLI_GEHL_HISTORIES::arr[];
 /****************************************************************************************/
 struct CONFIG_32KB {
   // static constexpr bool PIPELINE_SUPPORT = true;
-  static constexpr bool USE_LOOP_PREDICTOR = true;
-  static constexpr bool USE_SC = true;
+  static constexpr bool USE_LOOP_PREDICTOR = false;
+  static constexpr bool USE_SC = false;
   static constexpr int CONFIDENCE_COUNTER_WIDTH = 7;
  
   struct TAGE {
@@ -578,8 +577,8 @@ constexpr int CONFIG_32KB::SC::SECOND_IMLI_GEHL_HISTORIES::arr[];
 /****************************************************************************************/
 struct CONFIG_128KB {
   // static constexpr bool PIPELINE_SUPPORT = true;
-  static constexpr bool USE_LOOP_PREDICTOR = true;
-  static constexpr bool USE_SC = true;
+  static constexpr bool USE_LOOP_PREDICTOR = false;
+  static constexpr bool USE_SC = false;
   static constexpr int CONFIDENCE_COUNTER_WIDTH = 7;
  
   struct TAGE {

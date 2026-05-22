@@ -31,6 +31,8 @@
 #include <queue>
 #include <stdexcept>
 #include <vector>
+#include <map>
+#include <utility>
 
 #include "champsim.h"
 #include "champsim_constants.h"
@@ -70,6 +72,14 @@ struct cpu_stats {
   std::array<long long, 8> total_branch_types = {};
   std::array<long long, 8> branch_type_misses = {};
 
+  // --- Fetch block statistics ---
+  // Stat 1: key = (num_branches_in_block, ends_with_branch), value = count
+  std::map<std::pair<uint64_t, bool>, uint64_t> fetch_block_branch_distribution;
+  // Stat 2: key = actual fetch block size, value = count
+  std::map<uint64_t, uint64_t> fetch_block_size_distribution;
+  // Stat 3: key = hypothetical block size (cut at any branch or FETCH_WIDTH)
+  std::map<uint64_t, uint64_t> hypothetical_block_size_distribution;
+
   uint64_t instrs() const { return end_instrs - begin_instrs; }
   uint64_t cycles() const { return end_cycles - begin_cycles; }
 };
@@ -94,27 +104,6 @@ struct LSQ_ENTRY {
 class O3_CPU : public champsim::operable
 {
 public:
-  // ------------------------------------------------------------
-  // Stored prediction and target for multi-block prediction 
-  // ----------------------------------------------------------
-  // uint64_t previous_block_pred_target = 0;
-  // bool     previous_block_pred_taken  = false;
-  // bool     previous_block_valid       = false;
-  // uint64_t previous_block_branch_ip = 0;
-  // mbtb_transition previous_block_last_transition = mbtb_transition::N;
-
-
-  // uint64_t last_branch_ip = 0;
-  // mbtb_transition last_transition = mbtb_transition::N;
-
-
-  // uint64_t previous_pred_target = 0;
-  // bool     previous_pred_always_taken = 0;
-  // bool     previous_pred_taken  = false;
-  // uint64_t previous_pred_branch_ip = 0;
-
-  // ---------------------------------------------------
-
   uint32_t cpu = 0;
 
   // cycle
@@ -164,6 +153,15 @@ public:
 
   // branch
   uint64_t fetch_resume_cycle = 0;
+
+  // Persistent fetch-block counters. Both survive across cycles so neither is
+  // fragmented by IFETCH_BUFFER back-pressure; they differ only in their cut rule.
+  //   - actual_*  : cut on TAKEN branch or FETCH_WIDTH
+  //   - hypothetical_block_counter : cut on ANY branch or FETCH_WIDTH
+  uint64_t actual_block_size_counter     = 0;
+  uint64_t actual_block_branches_counter = 0;
+  bool     actual_block_last_was_branch  = false;
+  uint64_t hypothetical_block_counter    = 0;
 
   const long IN_QUEUE_SIZE = 2 * FETCH_WIDTH;
   std::deque<ooo_model_instr> input_queue;

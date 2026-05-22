@@ -1,17 +1,463 @@
-#include <cstdint>
-#include <map>
+// #include <algorithm>
+// #include <array>
+// #include <bitset>
+// #include <cstdint>
+// #include <cstdlib>
+// #include <deque>
+// #include <iomanip>
+// #include <iostream>
+// #include <map>
+// #include <sstream>
+// #include <utility>
+
+// #include "msl/lru_table.h"
+// #include "ooo_cpu.h"
+
+// #define OPTIMIZATION_ON 1
+
+// namespace
+// {
+
+// enum class branch_info {
+//   INDIRECT,
+//   RETURN,
+//   ALWAYS_TAKEN,
+//   CONDITIONAL,
+// };
+
+// enum class mbtb_transition : uint8_t { T, N, R };
+
+// struct mbtb_entry_t {
+//   uint64_t ip_tag = 0;
+//   uint64_t target = 0;
+//   branch_info type = branch_info::ALWAYS_TAKEN;
+//   mbtb_transition transition = mbtb_transition::N;
+//   uint64_t ind_ctx = 0;  // 0 unless predecessor was indirect
+
+
+//   auto index() const { return ip_tag; }
+//   auto tag() const { return (ip_tag) ^ static_cast<uint64_t>(transition) ^ ind_ctx; }
+// };
+
+// struct sas_record_t {
+//   uint64_t target = 0;
+//   branch_info type = branch_info::ALWAYS_TAKEN;
+//   bool valid = false;
+// };
+
+// struct pending_mbtb_pred_t {
+//   uint64_t ip;
+//   uint64_t target;
+//   bool was_hit;
+// };
+
+// // -------- per-branch-type indexing -----------------------------------------
+// constexpr int N_BRANCH_TYPES = 7;
+// static int branch_type_idx(uint8_t bt) {
+//   switch (bt) {
+//     case BRANCH_DIRECT_JUMP:   return 0;
+//     case BRANCH_INDIRECT:      return 1;
+//     case BRANCH_CONDITIONAL:   return 2;
+//     case BRANCH_DIRECT_CALL:   return 3;
+//     case BRANCH_INDIRECT_CALL: return 4;
+//     case BRANCH_RETURN:        return 5;
+//     default:                   return 6;
+//   }
+// }
+// static const char* const BRANCH_TYPE_NAMES[N_BRANCH_TYPES] = {
+//   "DIRECT_JUMP", "INDIRECT", "CONDITIONAL", "DIRECT_CALL",
+//   "INDIRECT_CALL", "RETURN", "OTHER"
+// };
+
+// struct mbtb_stats_t {
+//   // Aggregate counters.
+//   uint64_t total_hits           = 0;
+//   uint64_t total_misses         = 0;
+//   uint64_t total_mispredictions = 0;
+//   uint64_t total_correct        = 0;
+
+//   // Per-branch-type breakdown (indexed by current branch's actual type).
+//   uint64_t per_type_hits          [N_BRANCH_TYPES] = {};
+//   uint64_t per_type_misses        [N_BRANCH_TYPES] = {};
+//   uint64_t per_type_mispredictions[N_BRANCH_TYPES] = {};
+//   uint64_t per_type_correct       [N_BRANCH_TYPES] = {};
+
+//   // Per-PREVIOUS-branch-type breakdown (indexed by the type of the branch
+//   // updated immediately before this one). The very first branch in the
+//   // trace has no predecessor and is therefore not counted in this split.
+//   uint64_t per_prev_type_hits          [N_BRANCH_TYPES] = {};
+//   uint64_t per_prev_type_misses        [N_BRANCH_TYPES] = {};
+//   uint64_t per_prev_type_mispredictions[N_BRANCH_TYPES] = {};
+//   uint64_t per_prev_type_correct       [N_BRANCH_TYPES] = {};
+// };
+
+// constexpr std::size_t BTB_SET = 2048;
+// constexpr std::size_t BTB_WAY = 4;
+// constexpr std::size_t BTB_INDIRECT_SIZE = 4096;
+// constexpr std::size_t RAS_SIZE = 64;
+// constexpr std::size_t SAS_SIZE = 64;
+// constexpr std::size_t CALL_SIZE_TRACKERS = 1024;
+
+// class MultiBlockBTBContext {
+//  public:
+//   std::map<O3_CPU*, champsim::msl::lru_table<mbtb_entry_t>> MBTB;
+//   std::map<O3_CPU*, std::array<uint64_t, BTB_INDIRECT_SIZE>> INDIRECT_BTB;
+//   std::map<O3_CPU*, std::bitset<champsim::lg2(BTB_INDIRECT_SIZE)>> CONDITIONAL_HISTORY;
+//   std::map<O3_CPU*, std::deque<uint64_t>> RAS;
+//   std::map<O3_CPU*, std::deque<sas_record_t>> SAS;
+//   std::map<O3_CPU*, std::array<uint64_t, CALL_SIZE_TRACKERS>> CALL_SIZE;
+//   std::map<O3_CPU*, uint64_t> LAST_BRANCH_IP;
+//   std::map<O3_CPU*, mbtb_transition> LAST_TRANSITION;
+//   std::map<O3_CPU*, bool> LAST_BRANCH_WAS_RETURN;
+//   std::map<O3_CPU*, uint64_t> LAST_RETURN_CALL_IP;
+//   std::map<O3_CPU*, sas_record_t> PENDING_SAS_ENTRY;
+//   std::map<O3_CPU*, std::deque<pending_mbtb_pred_t>> PRED_QUEUE;
+
+//   std::map<O3_CPU*, uint64_t> LAST_INDIRECT_TARGET;  // 0 unless previous branch was indirect
+//   // Type of the most recently UPDATED branch -- needed so that the next
+//   // update can record its prev-branch-type stats. (Stats-only state.)
+//   std::map<O3_CPU*, uint8_t> LAST_BRANCH_TYPE_FOR_STATS;
+//   std::map<O3_CPU*, bool>    HAS_LAST_BRANCH;
+//   std::map<O3_CPU*, mbtb_stats_t> STATS;
+
+//   ~MultiBlockBTBContext() { print_all(); }
+
+//   static void print_per_type(std::ostream& os,
+//                              const char* label,
+//                              const uint64_t (&arr)[N_BRANCH_TYPES]) {
+//     os << "  " << label << ":";
+//     for (int i = 0; i < N_BRANCH_TYPES; ++i)
+//       os << " " << BRANCH_TYPE_NAMES[i] << "=" << arr[i];
+//     os << "\n";
+//   }
+
+//   void print_all() {
+//     for (auto& [cpu, stats] : STATS) {
+//       (void)cpu;
+//       std::ostringstream oss;
+//       oss << std::fixed << std::setprecision(4);
+
+//       oss << "\n========== MULTI-BLOCK BTB STATISTICS ==========\n";
+//       oss << "Total hits:                " << stats.total_hits           << "\n";
+//       oss << "Total misses:              " << stats.total_misses         << "\n";
+//       oss << "Total mispredictions:      " << stats.total_mispredictions << "\n";
+//       oss << "Total correct predictions: " << stats.total_correct        << "\n";
+//       if ((stats.total_hits + stats.total_misses) > 0) {
+//         oss << "Hit rate:                  "
+//             << (100.0 * stats.total_hits / (stats.total_hits + stats.total_misses)) << "%\n";
+//       }
+//       if ((stats.total_correct + stats.total_mispredictions) > 0) {
+//         oss << "Prediction accuracy:       "
+//             << (100.0 * stats.total_correct
+//                 / (stats.total_correct + stats.total_mispredictions)) << "%\n";
+//       }
+
+//       oss << "\n--- Per-branch-type breakdown (current branch) ---\n";
+//       print_per_type(oss, "hits          ", stats.per_type_hits);
+//       print_per_type(oss, "misses        ", stats.per_type_misses);
+//       print_per_type(oss, "mispredictions", stats.per_type_mispredictions);
+//       print_per_type(oss, "correct       ", stats.per_type_correct);
+
+//       oss << "\n--- Per-previous-branch-type breakdown ---\n";
+//       print_per_type(oss, "hits          ", stats.per_prev_type_hits);
+//       print_per_type(oss, "misses        ", stats.per_prev_type_misses);
+//       print_per_type(oss, "mispredictions", stats.per_prev_type_mispredictions);
+//       print_per_type(oss, "correct       ", stats.per_prev_type_correct);
+
+//       oss << "=================================================\n";
+//       std::cerr << oss.str();
+//     }
+//     std::cerr << std::flush;
+//   }
+// };
+
+// static MultiBlockBTBContext g_ctx;
+
+// } // namespace
+
+// void O3_CPU::initialize_btb()
+// {
+//   g_ctx.MBTB.insert({this, champsim::msl::lru_table<mbtb_entry_t>{BTB_SET, BTB_WAY}});
+//   std::fill(std::begin(g_ctx.INDIRECT_BTB[this]), std::end(g_ctx.INDIRECT_BTB[this]), 0);
+//   std::fill(std::begin(g_ctx.CALL_SIZE[this]), std::end(g_ctx.CALL_SIZE[this]), 4);
+//   g_ctx.CONDITIONAL_HISTORY[this] = 0;
+//   g_ctx.LAST_BRANCH_IP[this] = 0;
+//   g_ctx.LAST_INDIRECT_TARGET[this] = 0;
+//   g_ctx.LAST_TRANSITION[this] = mbtb_transition::N;
+//   g_ctx.LAST_BRANCH_WAS_RETURN[this] = false;
+//   g_ctx.LAST_RETURN_CALL_IP[this] = 0;
+//   g_ctx.PENDING_SAS_ENTRY[this] = sas_record_t{};
+//   g_ctx.RAS[this].clear();
+//   g_ctx.SAS[this].clear();
+//   g_ctx.PRED_QUEUE[this].clear();
+//   g_ctx.LAST_BRANCH_TYPE_FOR_STATS[this] = 0;
+//   g_ctx.HAS_LAST_BRANCH[this] = false;
+//   g_ctx.STATS[this] = {};
+// }
+
+// std::pair<uint64_t, uint8_t> O3_CPU::btb_prediction(uint64_t ip)
+// {
+//   auto prev_ip   = g_ctx.LAST_BRANCH_IP[this];
+//   auto trans     = g_ctx.LAST_TRANSITION[this] == mbtb_transition::R
+//                        ? mbtb_transition::T : g_ctx.LAST_TRANSITION[this];
+//   bool was_ret   = g_ctx.LAST_BRANCH_WAS_RETURN[this];
+//   auto& pend_sas = g_ctx.PENDING_SAS_ENTRY[this];
+//   uint64_t pr_call_ip  = g_ctx.LAST_RETURN_CALL_IP[this];
+//   uint64_t ind_ctx = OPTIMIZATION_ON ? g_ctx.LAST_INDIRECT_TARGET[this] : 0;   // NEW
+
+//   uint64_t predicted_target = 0;
+//   uint8_t  always_taken     = false;
+//   branch_info pred_type     = branch_info::ALWAYS_TAKEN;
+//   bool was_hit              = false;
+
+//   if (was_ret && pend_sas.valid) {
+//     was_hit = true;
+//     pred_type = pend_sas.type;
+//     predicted_target = pend_sas.target;
+//   } else {
+//     auto entry = g_ctx.MBTB.at(this).check_hit(
+//         {prev_ip, 0, branch_info::ALWAYS_TAKEN, trans, ind_ctx});
+//     if (entry.has_value()) {
+//       was_hit = true;
+//       pred_type = entry->type;
+//       predicted_target = entry->target;
+//     }
+//   }
+
+//   if (was_hit) {
+//     if (pred_type == branch_info::RETURN) {
+//       if (std::empty(g_ctx.RAS[this])) {
+//         predicted_target = 0;
+//         always_taken = true;
+//       } else {
+//         auto target = g_ctx.RAS[this].back();
+//         auto size = g_ctx.CALL_SIZE[this][target % std::size(g_ctx.CALL_SIZE[this])];
+//         predicted_target = target + size;
+//         always_taken = true;
+//       }
+//     } else if (pred_type == branch_info::INDIRECT) {
+//       uint64_t hash = 0;
+//       if (was_ret && pend_sas.valid) {
+//         hash = (pr_call_ip) ^ g_ctx.CONDITIONAL_HISTORY[this].to_ullong() ^ static_cast<uint64_t>(mbtb_transition::R);
+//       } else {
+//         hash = ((prev_ip) ^ g_ctx.CONDITIONAL_HISTORY[this].to_ullong()) ^ static_cast<uint64_t>(trans);
+//       }
+//       predicted_target = g_ctx.INDIRECT_BTB[this][hash % std::size(g_ctx.INDIRECT_BTB[this])];
+//       always_taken = true;
+//     } else if (pred_type == branch_info::CONDITIONAL) {
+//       always_taken = false;
+//     } else {
+//       always_taken = true;
+//     }
+//   }
+
+//   g_ctx.PRED_QUEUE[this].push_back({ip, predicted_target, was_hit});
+//   return {predicted_target, always_taken};
+// }
+
+// void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint8_t branch_type)
+// {
+//   auto& stats = g_ctx.STATS[this];
+
+//   // ---- Drain PRED_QUEUE ------------------------------------------------
+//   auto& q = g_ctx.PRED_QUEUE[this];
+//   bool found = false;
+//   pending_mbtb_pred_t pred{};
+//   while (!q.empty()) {
+//     pred = q.front();
+//     q.pop_front();
+//     if (pred.ip == ip) { found = true; break; }
+//   }
+
+//   // Compute the transition this branch produces.
+//   mbtb_transition actual_trans;
+//   if (branch_type == BRANCH_DIRECT_CALL || branch_type == BRANCH_INDIRECT_CALL) {
+//     actual_trans = mbtb_transition::R;
+//   } else if (taken &&
+//              branch_type != BRANCH_RETURN &&
+//              branch_type != BRANCH_DIRECT_CALL &&
+//              branch_type != BRANCH_INDIRECT_CALL) {
+//     actual_trans = mbtb_transition::T;
+//   } else {
+//     actual_trans = mbtb_transition::N;
+//   }
+
+//   bool prev_was_return = g_ctx.LAST_BRANCH_WAS_RETURN[this];
+//   uint64_t pr_call_ip  = g_ctx.LAST_RETURN_CALL_IP[this];
+
+//   // ---- Hit/miss + misprediction/correct accounting ---------------------
+//   int  ti               = branch_type_idx(branch_type);
+//   bool was_hit          = found && pred.was_hit;
+//   bool target_required  = taken
+//                           || (branch_type != BRANCH_CONDITIONAL && branch_type != BRANCH_OTHER);
+//   bool target_correct   = was_hit && (pred.target == branch_target);
+//   bool is_misprediction = target_required && !target_correct;
+
+//   if (was_hit) {
+//     stats.total_hits++;
+//     stats.per_type_hits[ti]++;
+//   } else {
+//     stats.total_misses++;
+//     stats.per_type_misses[ti]++;
+//   }
+
+//   if (is_misprediction) {
+//     stats.total_mispredictions++;
+//     stats.per_type_mispredictions[ti]++;
+//   } else {
+//     stats.total_correct++;
+//     stats.per_type_correct[ti]++;
+//   }
+
+//   // Per-previous-branch-type split (skips the very first branch).
+//   if (g_ctx.HAS_LAST_BRANCH[this]) {
+//     int pti = branch_type_idx(g_ctx.LAST_BRANCH_TYPE_FOR_STATS[this]);
+//     if (was_hit) stats.per_prev_type_hits[pti]++;
+//     else         stats.per_prev_type_misses[pti]++;
+//     if (is_misprediction) stats.per_prev_type_mispredictions[pti]++;
+//     else                  stats.per_prev_type_correct[pti]++;
+//   }
+
+//   // ---- CALL: RAS + SAS push (UNCHANGED) --------------------------------
+//   if (branch_type == BRANCH_DIRECT_CALL || branch_type == BRANCH_INDIRECT_CALL) {
+//     g_ctx.RAS[this].push_back(ip);
+
+//     sas_record_t snap{};
+//     auto entry = g_ctx.MBTB.at(this).check_hit({ip, 0, branch_info::ALWAYS_TAKEN, mbtb_transition::R, 0});
+//     if (entry.has_value()) {
+//       snap.target = entry->target;
+//       snap.type   = entry->type;
+//       snap.valid  = true;
+//     } else {
+//       snap.valid = false;
+//     }
+
+//     g_ctx.SAS[this].push_back(snap);
+
+//     if (std::size(g_ctx.RAS[this]) > RAS_SIZE) g_ctx.RAS[this].pop_front();
+//     if (std::size(g_ctx.SAS[this]) > SAS_SIZE) g_ctx.SAS[this].pop_front();
+//   }
+
+//   // ---- RETURN: pop RAS + SAS (UNCHANGED) -------------------------------
+//   bool         just_handled_return = false;
+//   uint64_t     popped_call_ip      = 0;
+//   sas_record_t popped_sas{};
+
+//   if (branch_type == BRANCH_RETURN && !std::empty(g_ctx.RAS[this])) {
+//     popped_call_ip = g_ctx.RAS[this].back();
+//     g_ctx.RAS[this].pop_back();
+
+//     if (!std::empty(g_ctx.SAS[this])) {
+//       popped_sas = g_ctx.SAS[this].back();
+//       g_ctx.SAS[this].pop_back();
+//     } else {
+//       popped_sas.valid = false;
+//     }
+
+//     auto estimated_size = std::abs((long)(popped_call_ip - branch_target));
+//     if (estimated_size <= 10) {
+//       g_ctx.CALL_SIZE[this][popped_call_ip % std::size(g_ctx.CALL_SIZE[this])] = estimated_size;
+//     }
+
+//     just_handled_return = true;
+//   }
+
+//   // ---- Indirect target / history (UNCHANGED) ---------------------------
+//   auto prev_ip    = g_ctx.LAST_BRANCH_IP[this];
+//   auto prev_trans = g_ctx.LAST_TRANSITION[this] == mbtb_transition::R ? mbtb_transition::T : g_ctx.LAST_TRANSITION[this];
+//   auto& pend_sas = g_ctx.PENDING_SAS_ENTRY[this];
+
+//   if (branch_type == BRANCH_INDIRECT || branch_type == BRANCH_INDIRECT_CALL) {
+//     uint64_t hash = 0;
+//     if (prev_was_return && pend_sas.valid) {
+//       hash = (pr_call_ip) ^ g_ctx.CONDITIONAL_HISTORY[this].to_ullong() ^ static_cast<uint64_t>(mbtb_transition::R);
+//     } else {
+//       hash = ((prev_ip) ^ g_ctx.CONDITIONAL_HISTORY[this].to_ullong()) ^ static_cast<uint64_t>(prev_trans);
+//     }
+//     g_ctx.INDIRECT_BTB[this][hash % std::size(g_ctx.INDIRECT_BTB[this])]
+//         = branch_target;
+//   }
+
+//   if (branch_type == BRANCH_CONDITIONAL || branch_type == BRANCH_OTHER) {
+//     g_ctx.CONDITIONAL_HISTORY[this] <<= 1;
+//     g_ctx.CONDITIONAL_HISTORY[this].set(0, taken);
+//   }
+
+//   // ---- Resolve type ----------------------------------------------------
+//   auto type = branch_info::ALWAYS_TAKEN;
+//   if      (branch_type == BRANCH_INDIRECT || branch_type == BRANCH_INDIRECT_CALL) type = branch_info::INDIRECT;
+//   else if (branch_type == BRANCH_RETURN)                                          type = branch_info::RETURN;
+//   else if (branch_type == BRANCH_CONDITIONAL || branch_type == BRANCH_OTHER)      type = branch_info::CONDITIONAL;
+
+//   // ---- MBTB write (UNCHANGED) ------------------------------------------
+//   if (prev_was_return) {
+//     if (branch_target != 0) {
+//       auto opt_entry = g_ctx.MBTB.at(this).check_hit({pr_call_ip, branch_target, type, mbtb_transition::R, 0});
+//       if (opt_entry.has_value()) {
+//         opt_entry->target = branch_target;
+//         opt_entry->type = type;
+//       }
+//       g_ctx.MBTB.at(this).fill(opt_entry.value_or(mbtb_entry_t{pr_call_ip, branch_target, type, mbtb_transition::R, 0}));
+//     }
+//   } else {
+//     prev_trans = g_ctx.LAST_TRANSITION[this] == mbtb_transition::R
+//                      ? mbtb_transition::T : g_ctx.LAST_TRANSITION[this];
+
+//     uint64_t ind_ctx = OPTIMIZATION_ON ? g_ctx.LAST_INDIRECT_TARGET[this] : 0;   // NEW
+
+//     auto opt_entry = g_ctx.MBTB.at(this).check_hit({prev_ip, branch_target, type, prev_trans, ind_ctx});
+//     if (opt_entry.has_value()) {
+//       if (branch_target != 0) opt_entry->target = branch_target;
+//       opt_entry->type = type;
+//     }
+//     if (branch_target != 0) {
+//       g_ctx.MBTB.at(this).fill(
+//           opt_entry.value_or(mbtb_entry_t{prev_ip, branch_target, type, prev_trans, ind_ctx}));
+//     }
+//   }
+
+//   // ---- Roll forward state ----------------------------------------------
+//   g_ctx.LAST_BRANCH_IP[this]  = ip;
+//   g_ctx.LAST_TRANSITION[this] = actual_trans;
+
+//   if (just_handled_return) {
+//     g_ctx.LAST_BRANCH_WAS_RETURN[this] = true;
+//     g_ctx.LAST_RETURN_CALL_IP[this]    = popped_call_ip;
+//     g_ctx.PENDING_SAS_ENTRY[this]      = popped_sas;
+//   } else {
+//     g_ctx.LAST_BRANCH_WAS_RETURN[this]  = false;
+//     g_ctx.PENDING_SAS_ENTRY[this].valid = false;
+//   }
+
+//   if (branch_type == BRANCH_INDIRECT || branch_type == BRANCH_INDIRECT_CALL) {
+//     g_ctx.LAST_INDIRECT_TARGET[this] = branch_target;
+//   } else {
+//     g_ctx.LAST_INDIRECT_TARGET[this] = 0;
+//   }
+
+//   g_ctx.LAST_BRANCH_TYPE_FOR_STATS[this] = branch_type;
+//   g_ctx.HAS_LAST_BRANCH[this] = true;
+// }
+
+
+
+
+#include <algorithm>
 #include <array>
 #include <bitset>
-#include <deque>
-#include <algorithm>
-#include <utility>
+#include <cstdint>
 #include <cstdlib>
+#include <deque>
+#include <iomanip>
+#include <iostream>
+#include <map>
+#include <sstream>
+#include <utility>
 
 #include "msl/lru_table.h"
 #include "ooo_cpu.h"
 
-
-
+#define OPTIMIZATION_ON 0
 
 namespace
 {
@@ -23,25 +469,74 @@ enum class branch_info {
   CONDITIONAL,
 };
 
-// ---- MBTB EXTENSION ----
-enum class mbtb_transition : uint8_t {
-  T,
-  N,
-  R
-};
+enum class mbtb_transition : uint8_t { T, N, R };
 
 struct mbtb_entry_t {
-  uint64_t ip_tag = 0;        // Aa (previous block branch)
-  uint64_t target = 0;        // Ci (future block target)
+  uint64_t ip_tag = 0;
+  uint64_t block_start = 0;   // Ai: block start     -> index   [NEW]
+  uint64_t target = 0;
   branch_info type = branch_info::ALWAYS_TAKEN;
-
   mbtb_transition transition = mbtb_transition::N;
+  uint64_t ind_ctx = 0;  // 0 unless predecessor was indirect
 
-  auto index() const { return ip_tag >> 2; }
-  auto tag() const { return (ip_tag >> 2) ^ static_cast<uint64_t>(transition); }
+
+  auto index() const { return block_start; }
+  auto tag() const { return (ip_tag) ^ static_cast<uint64_t>(transition) ^ ind_ctx; }
 };
 
-// ---- STORAGE ----
+struct sas_record_t {
+  uint64_t target = 0;
+  branch_info type = branch_info::ALWAYS_TAKEN;
+  bool valid = false;
+  uint64_t block_start = 0;   // [NEW] Ai of the call's block
+};
+
+struct pending_mbtb_pred_t {
+  uint64_t ip;
+  uint64_t target;
+  bool was_hit;
+};
+
+// -------- per-branch-type indexing -----------------------------------------
+constexpr int N_BRANCH_TYPES = 7;
+static int branch_type_idx(uint8_t bt) {
+  switch (bt) {
+    case BRANCH_DIRECT_JUMP:   return 0;
+    case BRANCH_INDIRECT:      return 1;
+    case BRANCH_CONDITIONAL:   return 2;
+    case BRANCH_DIRECT_CALL:   return 3;
+    case BRANCH_INDIRECT_CALL: return 4;
+    case BRANCH_RETURN:        return 5;
+    default:                   return 6;
+  }
+}
+static const char* const BRANCH_TYPE_NAMES[N_BRANCH_TYPES] = {
+  "DIRECT_JUMP", "INDIRECT", "CONDITIONAL", "DIRECT_CALL",
+  "INDIRECT_CALL", "RETURN", "OTHER"
+};
+
+struct mbtb_stats_t {
+  // Aggregate counters.
+  uint64_t total_hits           = 0;
+  uint64_t total_misses         = 0;
+  uint64_t total_mispredictions = 0;
+  uint64_t total_correct        = 0;
+
+  // Per-branch-type breakdown (indexed by current branch's actual type).
+  uint64_t per_type_hits          [N_BRANCH_TYPES] = {};
+  uint64_t per_type_misses        [N_BRANCH_TYPES] = {};
+  uint64_t per_type_mispredictions[N_BRANCH_TYPES] = {};
+  uint64_t per_type_correct       [N_BRANCH_TYPES] = {};
+
+  // Per-PREVIOUS-branch-type breakdown (indexed by the type of the branch
+  // updated immediately before this one). The very first branch in the
+  // trace has no predecessor and is therefore not counted in this split.
+  uint64_t per_prev_type_hits          [N_BRANCH_TYPES] = {};
+  uint64_t per_prev_type_misses        [N_BRANCH_TYPES] = {};
+  uint64_t per_prev_type_mispredictions[N_BRANCH_TYPES] = {};
+  uint64_t per_prev_type_correct       [N_BRANCH_TYPES] = {};
+};
+
 constexpr std::size_t BTB_SET = 2048;
 constexpr std::size_t BTB_WAY = 4;
 constexpr std::size_t BTB_INDIRECT_SIZE = 4096;
@@ -49,157 +544,363 @@ constexpr std::size_t RAS_SIZE = 64;
 constexpr std::size_t SAS_SIZE = 64;
 constexpr std::size_t CALL_SIZE_TRACKERS = 1024;
 
-// MBTB replaces BTB
-std::map<O3_CPU*, champsim::msl::lru_table<mbtb_entry_t>> MBTB;
+class MultiBlockBTBContext {
+ public:
+  std::map<O3_CPU*, champsim::msl::lru_table<mbtb_entry_t>> MBTB;
+  std::map<O3_CPU*, std::array<uint64_t, BTB_INDIRECT_SIZE>> INDIRECT_BTB;
+  std::map<O3_CPU*, std::bitset<champsim::lg2(BTB_INDIRECT_SIZE)>> CONDITIONAL_HISTORY;
+  std::map<O3_CPU*, std::deque<uint64_t>> RAS;
+  std::map<O3_CPU*, std::deque<sas_record_t>> SAS;
+  std::map<O3_CPU*, std::array<uint64_t, CALL_SIZE_TRACKERS>> CALL_SIZE;
+  std::map<O3_CPU*, uint64_t> LAST_BRANCH_IP;
+  std::map<O3_CPU*, mbtb_transition> LAST_TRANSITION;
+  std::map<O3_CPU*, bool> LAST_BRANCH_WAS_RETURN;
+  std::map<O3_CPU*, uint64_t> LAST_RETURN_CALL_IP;
+  std::map<O3_CPU*, sas_record_t> PENDING_SAS_ENTRY;
+  std::map<O3_CPU*, std::deque<pending_mbtb_pred_t>> PRED_QUEUE;
 
-std::map<O3_CPU*, std::array<uint64_t, BTB_INDIRECT_SIZE>> INDIRECT_BTB;
-std::map<O3_CPU*, std::bitset<champsim::lg2(BTB_INDIRECT_SIZE)>> CONDITIONAL_HISTORY;
+  std::map<O3_CPU*, uint64_t> LAST_INDIRECT_TARGET;  // 0 unless previous branch was indirect
+  // Type of the most recently UPDATED branch -- needed so that the next
+  // update can record its prev-branch-type stats. (Stats-only state.)
+  std::map<O3_CPU*, uint8_t> LAST_BRANCH_TYPE_FOR_STATS;
+  std::map<O3_CPU*, bool>    HAS_LAST_BRANCH;
+  std::map<O3_CPU*, mbtb_stats_t> STATS;
 
-std::map<O3_CPU*, std::deque<uint64_t>> RAS;
-std::map<O3_CPU*, std::deque<uint64_t>> SAS;
+  std::map<O3_CPU*, uint64_t> CUR_BLOCK_START;      // live: start of block being fetched
+  std::map<O3_CPU*, bool>     NEW_BLOCK_PENDING;    // next fetched instr starts a new block
+  std::map<O3_CPU*, uint64_t> LAST_BLOCK_START_IP;  // Ai paired with LAST_BRANCH_IP
 
-std::map<O3_CPU*, std::array<uint64_t, CALL_SIZE_TRACKERS>> CALL_SIZE;
+  ~MultiBlockBTBContext() { print_all(); }
 
-// ---- Track previous block branch (Aa) ----
-std::map<O3_CPU*, uint64_t> LAST_BRANCH_IP;
-std::map<O3_CPU*, mbtb_transition> LAST_TRANSITION;
+  static void print_per_type(std::ostream& os,
+                             const char* label,
+                             const uint64_t (&arr)[N_BRANCH_TYPES]) {
+    os << "  " << label << ":";
+    for (int i = 0; i < N_BRANCH_TYPES; ++i)
+      os << " " << BRANCH_TYPE_NAMES[i] << "=" << arr[i];
+    os << "\n";
+  }
+
+  void print_all() {
+    for (auto& [cpu, stats] : STATS) {
+      (void)cpu;
+      std::ostringstream oss;
+      oss << std::fixed << std::setprecision(4);
+
+      oss << "\n========== MULTI-BLOCK BTB STATISTICS ==========\n";
+      oss << "Total hits:                " << stats.total_hits           << "\n";
+      oss << "Total misses:              " << stats.total_misses         << "\n";
+      oss << "Total mispredictions:      " << stats.total_mispredictions << "\n";
+      oss << "Total correct predictions: " << stats.total_correct        << "\n";
+      if ((stats.total_hits + stats.total_misses) > 0) {
+        oss << "Hit rate:                  "
+            << (100.0 * stats.total_hits / (stats.total_hits + stats.total_misses)) << "%\n";
+      }
+      if ((stats.total_correct + stats.total_mispredictions) > 0) {
+        oss << "Prediction accuracy:       "
+            << (100.0 * stats.total_correct
+                / (stats.total_correct + stats.total_mispredictions)) << "%\n";
+      }
+
+      oss << "\n--- Per-branch-type breakdown (current branch) ---\n";
+      print_per_type(oss, "hits          ", stats.per_type_hits);
+      print_per_type(oss, "misses        ", stats.per_type_misses);
+      print_per_type(oss, "mispredictions", stats.per_type_mispredictions);
+      print_per_type(oss, "correct       ", stats.per_type_correct);
+
+      oss << "\n--- Per-previous-branch-type breakdown ---\n";
+      print_per_type(oss, "hits          ", stats.per_prev_type_hits);
+      print_per_type(oss, "misses        ", stats.per_prev_type_misses);
+      print_per_type(oss, "mispredictions", stats.per_prev_type_mispredictions);
+      print_per_type(oss, "correct       ", stats.per_prev_type_correct);
+
+      oss << "=================================================\n";
+      std::cerr << oss.str();
+    }
+    std::cerr << std::flush;
+  }
+};
+
+static MultiBlockBTBContext g_ctx;
 
 } // namespace
 
-
 void O3_CPU::initialize_btb()
 {
-  ::MBTB.insert({this, champsim::msl::lru_table<mbtb_entry_t>{BTB_SET, BTB_WAY}});
-
-  std::fill(std::begin(::INDIRECT_BTB[this]), std::end(::INDIRECT_BTB[this]), 0);
-  std::fill(std::begin(::CALL_SIZE[this]), std::end(::CALL_SIZE[this]), 4);
-
-  ::CONDITIONAL_HISTORY[this] = 0;
-  ::LAST_BRANCH_IP[this] = 0;
-  ::LAST_TRANSITION[this] = mbtb_transition::N;
+  g_ctx.MBTB.insert({this, champsim::msl::lru_table<mbtb_entry_t>{BTB_SET, BTB_WAY}});
+  std::fill(std::begin(g_ctx.INDIRECT_BTB[this]), std::end(g_ctx.INDIRECT_BTB[this]), 0);
+  std::fill(std::begin(g_ctx.CALL_SIZE[this]), std::end(g_ctx.CALL_SIZE[this]), 4);
+  g_ctx.CONDITIONAL_HISTORY[this] = 0;
+  g_ctx.LAST_BRANCH_IP[this] = 0;
+  g_ctx.LAST_INDIRECT_TARGET[this] = 0;
+  g_ctx.LAST_TRANSITION[this] = mbtb_transition::N;
+  g_ctx.LAST_BRANCH_WAS_RETURN[this] = false;
+  g_ctx.LAST_RETURN_CALL_IP[this] = 0;
+  g_ctx.PENDING_SAS_ENTRY[this] = sas_record_t{};
+  g_ctx.RAS[this].clear();
+  g_ctx.SAS[this].clear();
+  g_ctx.PRED_QUEUE[this].clear();
+  g_ctx.LAST_BRANCH_TYPE_FOR_STATS[this] = 0;
+  g_ctx.HAS_LAST_BRANCH[this] = false;
+  g_ctx.STATS[this] = {};
 }
-
 
 std::pair<uint64_t, uint8_t> O3_CPU::btb_prediction(uint64_t ip)
 {
-  auto prev_ip = ::LAST_BRANCH_IP[this];
-  auto trans   = ::LAST_TRANSITION[this];
 
-  auto entry = ::MBTB.at(this).check_hit({prev_ip, 0, branch_info::ALWAYS_TAKEN, trans});
-
-  if (!entry.has_value())
-    return {0, false};
-
-  // ---- RETURN handling via RAS ----
-  if (entry->type == branch_info::RETURN) {
-    if (std::empty(::RAS[this]))
-      return {0, true};
-
-    auto target = ::RAS[this].back();
-    auto size = ::CALL_SIZE[this][target % std::size(::CALL_SIZE[this])];
-    return {target + size, true};
+  // Ai tracking: first instruction fetched after a branch is the new block's start.
+  if (g_ctx.NEW_BLOCK_PENDING[this]) {
+    g_ctx.CUR_BLOCK_START[this]   = ip;
+    g_ctx.NEW_BLOCK_PENDING[this] = false;
   }
-
-  // ---- INDIRECT ----
-  if (entry->type == branch_info::INDIRECT) {
-    auto hash = (ip >> 2) ^ ::CONDITIONAL_HISTORY[this].to_ullong();
-    return {::INDIRECT_BTB[this][hash % std::size(::INDIRECT_BTB[this])], true};
-  }
-
-  return {entry->target, entry->type != branch_info::CONDITIONAL};
-}
+  auto prev_block_start = g_ctx.LAST_BLOCK_START_IP[this];   // Ai of prev_ip's block
 
 
+  auto prev_ip   = g_ctx.LAST_BRANCH_IP[this];
+  auto trans     = g_ctx.LAST_TRANSITION[this] == mbtb_transition::R
+                       ? mbtb_transition::T : g_ctx.LAST_TRANSITION[this];
+  bool was_ret   = g_ctx.LAST_BRANCH_WAS_RETURN[this];
+  auto& pend_sas = g_ctx.PENDING_SAS_ENTRY[this];
+  uint64_t pr_call_ip  = g_ctx.LAST_RETURN_CALL_IP[this];
+  uint64_t ind_ctx = OPTIMIZATION_ON ? g_ctx.LAST_INDIRECT_TARGET[this] : 0;   // NEW
 
+  uint64_t predicted_target = 0;
+  uint8_t  always_taken     = false;
+  branch_info pred_type     = branch_info::ALWAYS_TAKEN;
+  bool was_hit              = false;
 
-void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint8_t branch_type)
-{
-  // ---- CALL handling ----
-  if (branch_type == BRANCH_DIRECT_CALL || branch_type == BRANCH_INDIRECT_CALL) {
-    ::RAS[this].push_back(ip);
-    ::SAS[this].push_back(ip);
-
-    if (std::size(::RAS[this]) > RAS_SIZE)
-      ::RAS[this].pop_front();
-
-    if (std::size(::SAS[this]) > SAS_SIZE)
-      ::SAS[this].pop_front();
-  }
-
-  // ---- RETURN ----
-  if (branch_type == BRANCH_RETURN && !std::empty(::RAS[this])) {
-    auto call_ip = ::RAS[this].back();
-    ::RAS[this].pop_back();
-
-    if (!std::empty(::SAS[this]))
-      ::SAS[this].pop_back();
-
-    auto estimated_size = std::abs((long)(call_ip - branch_target));
-    if (estimated_size <= 10) {
-      ::CALL_SIZE[this][call_ip % std::size(::CALL_SIZE[this])] = estimated_size;
+  if (was_ret && pend_sas.valid) {
+    was_hit = true;
+    pred_type = pend_sas.type;
+    predicted_target = pend_sas.target;
+  } else {
+    auto entry = g_ctx.MBTB.at(this).check_hit(
+        {prev_ip, prev_block_start, 0, branch_info::ALWAYS_TAKEN, trans, ind_ctx});
+    if (entry.has_value()) {
+      was_hit = true;
+      pred_type = entry->type;
+      predicted_target = entry->target;
     }
   }
 
-  // ---- INDIRECT ----
-  if ((branch_type == BRANCH_INDIRECT) || (branch_type == BRANCH_INDIRECT_CALL)) {
-    auto hash = (ip >> 2) ^ ::CONDITIONAL_HISTORY[this].to_ullong();
-    ::INDIRECT_BTB[this][hash % std::size(::INDIRECT_BTB[this])] = branch_target;
+  if (was_hit) {
+    if (pred_type == branch_info::RETURN) {
+      if (std::empty(g_ctx.RAS[this])) {
+        predicted_target = 0;
+        always_taken = true;
+      } else {
+        auto target = g_ctx.RAS[this].back();
+        auto size = g_ctx.CALL_SIZE[this][target % std::size(g_ctx.CALL_SIZE[this])];
+        predicted_target = target + size;
+        always_taken = true;
+      }
+    } else if (pred_type == branch_info::INDIRECT) {
+      uint64_t hash = 0;
+      if (was_ret && pend_sas.valid) {
+        hash = (pr_call_ip) ^ g_ctx.CONDITIONAL_HISTORY[this].to_ullong() ^ static_cast<uint64_t>(mbtb_transition::R);
+      } else {
+        hash = ((prev_ip) ^ g_ctx.CONDITIONAL_HISTORY[this].to_ullong()) ^ static_cast<uint64_t>(trans);
+      }
+      predicted_target = g_ctx.INDIRECT_BTB[this][hash % std::size(g_ctx.INDIRECT_BTB[this])];
+      always_taken = true;
+    } else if (pred_type == branch_info::CONDITIONAL) {
+      always_taken = false;
+    } else {
+      always_taken = true;
+    }
   }
 
-  // ---- CONDITIONAL HISTORY ----
-  if ((branch_type == BRANCH_CONDITIONAL) || (branch_type == BRANCH_OTHER)) {
-    ::CONDITIONAL_HISTORY[this] <<= 1;
-    ::CONDITIONAL_HISTORY[this].set(0, taken);
+  g_ctx.PRED_QUEUE[this].push_back({ip, predicted_target, was_hit});
+  return {predicted_target, always_taken};
+}
+
+void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint8_t branch_type)
+{
+  auto& stats = g_ctx.STATS[this];
+
+  // ---- Drain PRED_QUEUE ------------------------------------------------
+  auto& q = g_ctx.PRED_QUEUE[this];
+  bool found = false;
+  pending_mbtb_pred_t pred{};
+  while (!q.empty()) {
+    pred = q.front();
+    q.pop_front();
+    if (pred.ip == ip) { found = true; break; }
   }
 
-  // ---- Determine type ----
-  auto type = branch_info::ALWAYS_TAKEN;
-
-  if ((branch_type == BRANCH_INDIRECT) || (branch_type == BRANCH_INDIRECT_CALL))
-    type = branch_info::INDIRECT;
-  else if (branch_type == BRANCH_RETURN)
-    type = branch_info::RETURN;
-  else if ((branch_type == BRANCH_CONDITIONAL) || (branch_type == BRANCH_OTHER))
-    type = branch_info::CONDITIONAL;
-
-  // ---- Transition ----
-  mbtb_transition trans;
-
-  // R: previous instruction is a CALL
+  // Compute the transition this branch produces.
+  mbtb_transition actual_trans;
   if (branch_type == BRANCH_DIRECT_CALL || branch_type == BRANCH_INDIRECT_CALL) {
-    trans = mbtb_transition::R;
-  }
-  // T: taken branch that is NOT a call/return
-  else if (taken &&
-    branch_type != BRANCH_RETURN &&
-    branch_type != BRANCH_DIRECT_CALL &&
-    branch_type != BRANCH_INDIRECT_CALL) {
-    trans = mbtb_transition::T;
-  }
-  // N: everything else (non-branch OR not-taken conditional)
-  else {
-    trans = mbtb_transition::N;
+    actual_trans = mbtb_transition::R;
+  } else if (taken &&
+             branch_type != BRANCH_RETURN &&
+             branch_type != BRANCH_DIRECT_CALL &&
+             branch_type != BRANCH_INDIRECT_CALL) {
+    actual_trans = mbtb_transition::T;
+  } else {
+    actual_trans = mbtb_transition::N;
   }
 
-  
-  // ---- Update MBTB using PREVIOUS branch ----
-  auto prev_ip = ::LAST_BRANCH_IP[this];
-  auto prev_trans = ::LAST_TRANSITION[this];
 
-  auto opt_entry = ::MBTB.at(this).check_hit({prev_ip, branch_target, type, prev_trans});
+  uint64_t cur_block_start  = g_ctx.CUR_BLOCK_START[this];      // Ai of THIS branch's block
+  uint64_t prev_block_start = g_ctx.LAST_BLOCK_START_IP[this];  // Ai of prev_ip's block
+  bool prev_was_return = g_ctx.LAST_BRANCH_WAS_RETURN[this];
+  uint64_t pr_call_ip  = g_ctx.LAST_RETURN_CALL_IP[this];
 
-  if (opt_entry.has_value()) {
-    opt_entry->target = branch_target;
-    opt_entry->type = type;
+  // ---- Hit/miss + misprediction/correct accounting ---------------------
+  int  ti               = branch_type_idx(branch_type);
+  bool was_hit          = found && pred.was_hit;
+  bool target_required  = taken
+                          || (branch_type != BRANCH_CONDITIONAL && branch_type != BRANCH_OTHER);
+  bool target_correct   = was_hit && (pred.target == branch_target);
+  bool is_misprediction = target_required && !target_correct;
+
+  if (was_hit) {
+    stats.total_hits++;
+    stats.per_type_hits[ti]++;
+  } else {
+    stats.total_misses++;
+    stats.per_type_misses[ti]++;
   }
 
-  if (branch_target != 0) {
-    ::MBTB.at(this).fill(
-        opt_entry.value_or(mbtb_entry_t{prev_ip, branch_target, type, prev_trans})
-    );
+  if (is_misprediction) {
+    stats.total_mispredictions++;
+    stats.per_type_mispredictions[ti]++;
+  } else {
+    stats.total_correct++;
+    stats.per_type_correct[ti]++;
   }
 
-  // ---- Update LAST (Aa tracking) ----
-  ::LAST_BRANCH_IP[this] = ip;
-  ::LAST_TRANSITION[this] = trans;
+  // Per-previous-branch-type split (skips the very first branch).
+  if (g_ctx.HAS_LAST_BRANCH[this]) {
+    int pti = branch_type_idx(g_ctx.LAST_BRANCH_TYPE_FOR_STATS[this]);
+    if (was_hit) stats.per_prev_type_hits[pti]++;
+    else         stats.per_prev_type_misses[pti]++;
+    if (is_misprediction) stats.per_prev_type_mispredictions[pti]++;
+    else                  stats.per_prev_type_correct[pti]++;
+  }
+
+  // ---- CALL: RAS + SAS push (UNCHANGED) --------------------------------
+  if (branch_type == BRANCH_DIRECT_CALL || branch_type == BRANCH_INDIRECT_CALL) {
+    g_ctx.RAS[this].push_back(ip);
+
+    sas_record_t snap{};
+    snap.block_start = cur_block_start;                           // [NEW]
+    auto entry = g_ctx.MBTB.at(this).check_hit({ip, cur_block_start, 0, branch_info::ALWAYS_TAKEN, mbtb_transition::R, 0});
+    if (entry.has_value()) {
+      snap.target = entry->target;
+      snap.type   = entry->type;
+      snap.valid  = true;
+    } else {
+      snap.valid = false;
+    }
+
+    g_ctx.SAS[this].push_back(snap);
+
+    if (std::size(g_ctx.RAS[this]) > RAS_SIZE) g_ctx.RAS[this].pop_front();
+    if (std::size(g_ctx.SAS[this]) > SAS_SIZE) g_ctx.SAS[this].pop_front();
+  }
+
+  // ---- RETURN: pop RAS + SAS (UNCHANGED) -------------------------------
+  bool         just_handled_return = false;
+  uint64_t     popped_call_ip      = 0;
+  sas_record_t popped_sas{};
+
+  if (branch_type == BRANCH_RETURN && !std::empty(g_ctx.RAS[this])) {
+    popped_call_ip = g_ctx.RAS[this].back();
+    g_ctx.RAS[this].pop_back();
+
+    if (!std::empty(g_ctx.SAS[this])) {
+      popped_sas = g_ctx.SAS[this].back();
+      g_ctx.SAS[this].pop_back();
+    } else {
+      popped_sas.valid = false;
+    }
+
+    auto estimated_size = std::abs((long)(popped_call_ip - branch_target));
+    if (estimated_size <= 10) {
+      g_ctx.CALL_SIZE[this][popped_call_ip % std::size(g_ctx.CALL_SIZE[this])] = estimated_size;
+    }
+
+    just_handled_return = true;
+  }
+
+  // ---- Indirect target / history (UNCHANGED) ---------------------------
+  auto prev_ip    = g_ctx.LAST_BRANCH_IP[this];
+  auto prev_trans = g_ctx.LAST_TRANSITION[this] == mbtb_transition::R ? mbtb_transition::T : g_ctx.LAST_TRANSITION[this];
+  auto& pend_sas = g_ctx.PENDING_SAS_ENTRY[this];
+
+  if (branch_type == BRANCH_INDIRECT || branch_type == BRANCH_INDIRECT_CALL) {
+    uint64_t hash = 0;
+    if (prev_was_return && pend_sas.valid) {
+      hash = (pr_call_ip) ^ g_ctx.CONDITIONAL_HISTORY[this].to_ullong() ^ static_cast<uint64_t>(mbtb_transition::R);
+    } else {
+      hash = ((prev_ip) ^ g_ctx.CONDITIONAL_HISTORY[this].to_ullong()) ^ static_cast<uint64_t>(prev_trans);
+    }
+    g_ctx.INDIRECT_BTB[this][hash % std::size(g_ctx.INDIRECT_BTB[this])]
+        = branch_target;
+  }
+
+  if (branch_type == BRANCH_CONDITIONAL || branch_type == BRANCH_OTHER) {
+    g_ctx.CONDITIONAL_HISTORY[this] <<= 1;
+    g_ctx.CONDITIONAL_HISTORY[this].set(0, taken);
+  }
+
+  // ---- Resolve type ----------------------------------------------------
+  auto type = branch_info::ALWAYS_TAKEN;
+  if      (branch_type == BRANCH_INDIRECT || branch_type == BRANCH_INDIRECT_CALL) type = branch_info::INDIRECT;
+  else if (branch_type == BRANCH_RETURN)                                          type = branch_info::RETURN;
+  else if (branch_type == BRANCH_CONDITIONAL || branch_type == BRANCH_OTHER)      type = branch_info::CONDITIONAL;
+
+  // ---- MBTB write (UNCHANGED) ------------------------------------------
+  if (prev_was_return) {
+    if (branch_target != 0) {
+      auto opt_entry = g_ctx.MBTB.at(this).check_hit({pr_call_ip, pend_sas.block_start, branch_target, type, mbtb_transition::R, 0});
+      if (opt_entry.has_value()) {
+        opt_entry->target = branch_target;
+        opt_entry->type = type;
+      }
+      g_ctx.MBTB.at(this).fill(opt_entry.value_or(mbtb_entry_t{pr_call_ip, pend_sas.block_start, branch_target, type, mbtb_transition::R, 0}));
+    }
+  } else {
+    prev_trans = g_ctx.LAST_TRANSITION[this] == mbtb_transition::R
+                     ? mbtb_transition::T : g_ctx.LAST_TRANSITION[this];
+
+    uint64_t ind_ctx = OPTIMIZATION_ON ? g_ctx.LAST_INDIRECT_TARGET[this] : 0;   // NEW
+
+    auto opt_entry = g_ctx.MBTB.at(this).check_hit({prev_ip, prev_block_start, branch_target, type, prev_trans, ind_ctx});
+    if (opt_entry.has_value()) {
+      if (branch_target != 0) opt_entry->target = branch_target;
+      opt_entry->type = type;
+    }
+    if (branch_target != 0) {
+      g_ctx.MBTB.at(this).fill(
+          opt_entry.value_or(mbtb_entry_t{prev_ip, prev_block_start, branch_target, type, prev_trans, ind_ctx}));
+    }
+  }
+
+  // ---- Roll forward state ----------------------------------------------
+  g_ctx.LAST_BRANCH_IP[this]  = ip;
+  g_ctx.LAST_TRANSITION[this] = actual_trans;
+
+  g_ctx.LAST_BLOCK_START_IP[this] = cur_block_start;  // pair Ai with the branch just stored
+  g_ctx.NEW_BLOCK_PENDING[this]   = true;             // next fetched instr begins a new block
+
+  if (just_handled_return) {
+    g_ctx.LAST_BRANCH_WAS_RETURN[this] = true;
+    g_ctx.LAST_RETURN_CALL_IP[this]    = popped_call_ip;
+    g_ctx.PENDING_SAS_ENTRY[this]      = popped_sas;
+  } else {
+    g_ctx.LAST_BRANCH_WAS_RETURN[this]  = false;
+    g_ctx.PENDING_SAS_ENTRY[this].valid = false;
+  }
+
+  if (branch_type == BRANCH_INDIRECT || branch_type == BRANCH_INDIRECT_CALL) {
+    g_ctx.LAST_INDIRECT_TARGET[this] = branch_target;
+  } else {
+    g_ctx.LAST_INDIRECT_TARGET[this] = 0;
+  }
+
+  g_ctx.LAST_BRANCH_TYPE_FOR_STATS[this] = branch_type;
+  g_ctx.HAS_LAST_BRANCH[this] = true;
 }
