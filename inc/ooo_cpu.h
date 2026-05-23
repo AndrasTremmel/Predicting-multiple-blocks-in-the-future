@@ -209,6 +209,56 @@ public:
 
   void print_deadlock() override final;
 
+
+  // /*------------------------------------------------------------*/
+  // /*  One-block-ahead fetch-block prediction state (Seznec'96)  */
+  // /*------------------------------------------------------------*/
+  // struct fetch_block_pred {
+  //     uint64_t block_start    = 0; // Ai
+  //     uint64_t pred_branch_ip = 0; // Bb predicted to end this block
+  //     uint64_t pred_target    = 0; // Ci predicted next block start
+  //     uint8_t  pred_always_taken = 0;
+  //     bool     has_pred       = false;
+  //     uint64_t instrs_in_block = 0;
+  // };
+  // fetch_block_pred fb_pred;
+
+  // // Called once per fetch block.  Defined in the BTB compilation unit.
+  // void btb_begin_block(uint64_t block_start_ip);
+  // void btb_update_block(uint64_t block_start, uint64_t branch_ip,
+  //                       uint64_t branch_target, uint8_t taken,
+  //                       uint8_t branch_type);
+
+
+
+  /*------------------------------------------------------------*/
+  /*  Two-block-ahead pipelined fetch-block prediction state    */
+  /*------------------------------------------------------------*/
+  struct fetch_block_pred {
+      uint64_t block_start       = 0;
+      uint64_t pred_branch_ip    = 0;
+      uint64_t pred_target       = 0;
+      uint8_t  pred_always_taken = 0;
+      uint8_t  pred_branch_type  = NOT_BRANCH;
+      bool     has_pred          = false;
+      uint64_t instrs_in_block   = 0;
+  };
+  fetch_block_pred fb_pred;
+
+  // Predecessor block state used to index/tag the two-block-ahead BTB
+  uint64_t prev_block_start  = 0;
+  uint64_t prev_branch_ip   = 0;
+  uint8_t  prev_branch_type = NOT_BRANCH;
+  uint8_t  prev_taken       = 0;
+  bool     prev_block_valid = false;
+
+  void btb_begin_block(uint64_t pred_block_start, uint64_t pred_branch_ip, uint8_t pred_transition);
+  void btb_update_block(uint64_t pred_block_start, uint64_t pred_branch_ip, uint8_t pred_transition,
+                        uint64_t block_start, uint64_t branch_ip,
+                        uint64_t branch_target, uint8_t taken,
+                        uint8_t branch_type);
+
+
 #include "ooo_cpu_module_decl.inc"
 
   struct module_concept {
