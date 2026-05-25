@@ -65,9 +65,9 @@ void champsim::plain_printer::print(O3_CPU::stats_type stats)
     fmt::print(stream, "{}    size: {:2d}  count: {:10d}\n", stats.name, size, count);
   }
 
-  // Stat 3: hypothetical fetch block sizes (cut at any branch or FETCH_WIDTH)
-  fmt::print(stream, "{}  Hypothetical block size distribution (cut at any branch or FETCH_WIDTH):\n", stats.name);
-  for (const auto& [size, count] : stats.hypothetical_block_size_distribution) {
+  // Stat 3: two-block ahead fetch block sizes (cut at 2nd stop branch or FETCH_WIDTH)
+  fmt::print(stream, "{}  Two-block ahead size distribution (cut at 2nd stop branch or FETCH_WIDTH):\n", stats.name);
+  for (const auto& [size, count] : stats.two_block_ahead_size_distribution) {
     fmt::print(stream, "{}    size: {:2d}  count: {:10d}\n", stats.name, size, count);
   }
 

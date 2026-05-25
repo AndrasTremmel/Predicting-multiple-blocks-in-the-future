@@ -33,6 +33,7 @@
 #include <vector>
 #include <map>
 #include <utility>
+#include <unordered_set>
 
 #include "champsim.h"
 #include "champsim_constants.h"
@@ -42,6 +43,18 @@
 #include "operable.h"
 #include "util/lru_table.h"
 #include <type_traits>
+
+
+// --- Actual fetch block macro toggles ---
+// Uncomment the line below to enable:
+// A conditional branch that is not-taken now but was previously predicted taken
+// will NOT cut the actual fetch block if it is the LAST branch in its cache line.
+#define L_BIT_OPTIMIZATION
+
+// Uncomment the line below to enable:
+// The actual fetch block counters will reset when a new cache line is reached.
+#define ACTUAL_BLOCK_RESET_AT_CACHE_LINE
+
 
 enum STATUS { INFLIGHT = 1, COMPLETED = 2 };
 
@@ -77,8 +90,8 @@ struct cpu_stats {
   std::map<std::pair<uint64_t, bool>, uint64_t> fetch_block_branch_distribution;
   // Stat 2: key = actual fetch block size, value = count
   std::map<uint64_t, uint64_t> fetch_block_size_distribution;
-  // Stat 3: key = hypothetical block size (cut at any branch or FETCH_WIDTH)
-  std::map<uint64_t, uint64_t> hypothetical_block_size_distribution;
+  // Stat 3: key = two-block ahead size (cut at 2nd stop branch or FETCH_WIDTH)
+  std::map<uint64_t, uint64_t> two_block_ahead_size_distribution;
 
   uint64_t instrs() const { return end_instrs - begin_instrs; }
   uint64_t cycles() const { return end_cycles - begin_cycles; }
@@ -154,14 +167,19 @@ public:
   // branch
   uint64_t fetch_resume_cycle = 0;
 
-  // Persistent fetch-block counters. Both survive across cycles so neither is
-  // fragmented by IFETCH_BUFFER back-pressure; they differ only in their cut rule.
-  //   - actual_*  : cut on TAKEN branch or FETCH_WIDTH
-  //   - hypothetical_block_counter : cut on ANY branch or FETCH_WIDTH
+  
   uint64_t actual_block_size_counter     = 0;
   uint64_t actual_block_branches_counter = 0;
   bool     actual_block_last_was_branch  = false;
-  uint64_t hypothetical_block_counter    = 0;
+  uint64_t actual_block_cache_line       = 0;   // cache line of the first instr in the current actual block
+
+  uint64_t two_block_ahead_counter         = 0;
+  uint64_t two_block_ahead_stop_branches   = 0; // number of stop branches counted in current two-block ahead block
+  uint64_t two_block_ahead_cache_line      = 0; // cache line of the first instr in the current two-block ahead block
+  // Conditional branch IPs that have been predicted taken at least once.
+  // Used by the hypothetical-block counter to decide whether a not-taken
+  // conditional branch should cut the block.
+  std::unordered_set<uint64_t> conditional_predicted_taken_ips;
 
   const long IN_QUEUE_SIZE = 2 * FETCH_WIDTH;
   std::deque<ooo_model_instr> input_queue;
