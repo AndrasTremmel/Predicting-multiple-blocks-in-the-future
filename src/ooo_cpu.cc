@@ -89,8 +89,15 @@ void O3_CPU::begin_phase()
   stats.begin_cycles = current_cycle;
   sim_stats = stats;
 
-  // reset basic block length counter after for each phase (so warmup cannot polute this)
-  hypothetical_block_counter = 0;
+  actual_block_size_counter     = 0;
+  actual_block_branches_counter = 0;
+
+  // reset two-block ahead counters after for each phase (so warmup cannot pollute this)
+  two_block_ahead_counter       = 0;
+  two_block_ahead_stop_branches = 0;
+
+  // Also reset the conditional-branch taken-history so phase stats stay clean.
+  conditional_predicted_taken_ips.clear();
 }
 
 void O3_CPU::end_phase(unsigned finished_cpu)
@@ -119,17 +126,61 @@ void O3_CPU::initialize_instruction()
     // branch_taken comes straight from the trace, so it's valid here even before do_predict_branch.
     const bool current_is_branch       = input_queue.front().is_branch;
     const bool current_is_taken_branch = current_is_branch && input_queue.front().branch_taken;
+    const uint8_t current_branch_type  = input_queue.front().branch_type;
+    const uint64_t current_ip          = input_queue.front().ip;
+    const uint64_t current_cache_line    = current_ip >> LOG2_BLOCK_SIZE;
 
     auto stop_fetch = do_init_instruction(input_queue.front());
     if (stop_fetch)
       instrs_to_read_this_cycle = 0;
 
-    // STATS: actual fetch block (now stream-level — cut only on taken branch or FETCH_WIDTH).
+    // STATS: actual fetch block (cut on taken branch, or conditional not-taken
+    //        that was previously predicted taken, or FETCH_WIDTH, or optionally
+    //        cache line boundary).
+#ifdef ACTUAL_BLOCK_RESET_AT_CACHE_LINE
+    if (actual_block_size_counter > 0 && current_cache_line != actual_block_cache_line) {
+      sim_stats.fetch_block_branch_distribution[{actual_block_branches_counter, actual_block_last_was_branch}]++;
+      sim_stats.fetch_block_size_distribution[actual_block_size_counter]++;
+      actual_block_size_counter     = 0;
+      actual_block_branches_counter = 0;
+      actual_block_last_was_branch  = false;
+    }
+#endif
+    if (actual_block_size_counter == 0) {
+      actual_block_cache_line = current_cache_line;
+    }
+
     ++actual_block_size_counter;
     actual_block_last_was_branch = current_is_branch;
     if (current_is_branch)
       ++actual_block_branches_counter;
-    if (current_is_taken_branch || actual_block_size_counter == static_cast<uint64_t>(FETCH_WIDTH)) {
+
+    bool cut_here = current_is_taken_branch || (actual_block_size_counter == static_cast<uint64_t>(FETCH_WIDTH));
+
+    // Cut on conditional not-taken branches that were previously predicted taken
+    if (!cut_here && current_is_branch && !current_is_taken_branch
+        && (current_branch_type == BRANCH_CONDITIONAL || current_branch_type == BRANCH_OTHER)) {
+      if (conditional_predicted_taken_ips.find(current_ip) != conditional_predicted_taken_ips.end()) {
+#ifdef L_BIT_OPTIMIZATION
+        // Check if this is the last branch in the cache line
+        bool is_last_branch_in_line = true;
+        for (auto it = input_queue.begin() + 1; it != input_queue.end(); ++it) {
+          if ((it->ip >> LOG2_BLOCK_SIZE) != current_cache_line)
+            break;
+          if (it->is_branch) {
+            is_last_branch_in_line = false;
+            break;
+          }
+        }
+        if (!is_last_branch_in_line)
+          cut_here = true;
+#else
+        cut_here = true;
+#endif
+      }
+    }
+
+    if (cut_here) {
       sim_stats.fetch_block_branch_distribution[{actual_block_branches_counter, actual_block_last_was_branch}]++;
       sim_stats.fetch_block_size_distribution[actual_block_size_counter]++;
       actual_block_size_counter     = 0;
@@ -138,12 +189,63 @@ void O3_CPU::initialize_instruction()
     }
 
 
-    // STATS: hypothetical fetch block (cut on ANY branch or FETCH_WIDTH).
-    ++hypothetical_block_counter;
-    if (current_is_branch || hypothetical_block_counter == static_cast<uint64_t>(FETCH_WIDTH)) {
-      sim_stats.hypothetical_block_size_distribution[hypothetical_block_counter]++;
-      hypothetical_block_counter = 0;
+
+
+    // STATS: two-block ahead (cut on 2nd stop branch or FETCH_WIDTH or cache line).
+#ifdef ACTUAL_BLOCK_RESET_AT_CACHE_LINE
+    if (two_block_ahead_counter > 0 && current_cache_line != two_block_ahead_cache_line) {
+      sim_stats.two_block_ahead_size_distribution[two_block_ahead_counter]++;
+      two_block_ahead_counter       = 0;
+      two_block_ahead_stop_branches = 0;
     }
+#endif
+    if (two_block_ahead_counter == 0) {
+      two_block_ahead_cache_line = current_cache_line;
+    }
+
+    ++two_block_ahead_counter;
+
+    // A "stop branch" uses the same definition as the actual fetch block:
+    //   taken, OR conditional not-taken that was previously predicted taken.
+    bool is_stop_branch = current_is_taken_branch;
+    if (!is_stop_branch && current_is_branch && !current_is_taken_branch
+        && (current_branch_type == BRANCH_CONDITIONAL || current_branch_type == BRANCH_OTHER)) {
+      if (conditional_predicted_taken_ips.find(current_ip) != conditional_predicted_taken_ips.end()) {
+#ifdef L_BIT_OPTIMIZATION
+        bool is_last_branch_in_line = true;
+        for (auto it = input_queue.begin() + 1; it != input_queue.end(); ++it) {
+          if ((it->ip >> LOG2_BLOCK_SIZE) != current_cache_line)
+            break;
+          if (it->is_branch) {
+            is_last_branch_in_line = false;
+            break;
+          }
+        }
+        if (!is_last_branch_in_line)
+          is_stop_branch = true;
+#else
+        is_stop_branch = true;
+#endif
+      }
+    }
+
+    if (is_stop_branch)
+      ++two_block_ahead_stop_branches;
+
+    if (two_block_ahead_stop_branches == 2 || two_block_ahead_counter == static_cast<uint64_t>(FETCH_WIDTH)) {
+      sim_stats.two_block_ahead_size_distribution[two_block_ahead_counter]++;
+      two_block_ahead_counter       = 0;
+      two_block_ahead_stop_branches = 0;
+    }
+
+
+    // Track conditional branches that have been predicted taken at least once.
+    // This is used by the actual fetch block counter to cut on not-taken
+    // conditional branches that were previously predicted taken.
+    if (current_is_branch && current_is_taken_branch && (current_branch_type == BRANCH_CONDITIONAL || current_branch_type == BRANCH_OTHER)) {
+      conditional_predicted_taken_ips.insert(current_ip);
+    }
+
 
     // Add to IFETCH_BUFFER
     IFETCH_BUFFER.push_back(input_queue.front());
@@ -196,24 +298,26 @@ bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
     // call code prefetcher every time the branch predictor is used
     l1i->impl_prefetcher_branch_operate(arch_instr.ip, arch_instr.branch_type, predicted_branch_target);
 
-    if (predicted_branch_target != arch_instr.branch_target
-        || (((arch_instr.branch_type == BRANCH_CONDITIONAL) || (arch_instr.branch_type == BRANCH_OTHER))
-            && arch_instr.branch_taken != arch_instr.branch_prediction)) { // conditional branches are re-evaluated at decode when the target is computed
-      sim_stats.total_rob_occupancy_at_branch_mispredict += std::size(ROB);
-      sim_stats.branch_type_misses[arch_instr.branch_type]++;
-      if (!warmup) {
-        fetch_resume_cycle = std::numeric_limits<uint64_t>::max();
-        stop_fetch = true;
-        arch_instr.branch_mispredicted = 1;
-      }
-    } else {
-      stop_fetch = arch_instr.branch_taken; // if correctly predicted taken, then we can't fetch anymore instructions this cycle
-    }
+    // if (predicted_branch_target != arch_instr.branch_target
+    //     || (((arch_instr.branch_type == BRANCH_CONDITIONAL) || (arch_instr.branch_type == BRANCH_OTHER))
+    //         && arch_instr.branch_taken != arch_instr.branch_prediction)) { // conditional branches are re-evaluated at decode when the target is computed
+    //   sim_stats.total_rob_occupancy_at_branch_mispredict += std::size(ROB);
+    //   sim_stats.branch_type_misses[arch_instr.branch_type]++;
+    //   if (!warmup) {
+    //     fetch_resume_cycle = std::numeric_limits<uint64_t>::max();
+    //     stop_fetch = true;
+    //     arch_instr.branch_mispredicted = 1;
+    //   }
+    // } else {
+    //   stop_fetch = arch_instr.branch_taken; // if correctly predicted taken, then we can't fetch anymore instructions this cycle
+    // }
 
-
-    impl_update_btb(arch_instr.ip, arch_instr.branch_target, arch_instr.branch_taken, arch_instr.branch_type);
-    impl_last_branch_result(arch_instr.ip, arch_instr.branch_target, arch_instr.branch_taken, arch_instr.branch_type);
+    // impl_update_btb(arch_instr.ip, arch_instr.branch_target, arch_instr.branch_taken, arch_instr.branch_type);
+    // impl_last_branch_result(arch_instr.ip, arch_instr.branch_target, arch_instr.branch_taken, arch_instr.branch_type);
   }
+
+  stop_fetch = arch_instr.branch_taken; // if correctly predicted taken, then we can't fetch anymore instructions this cycle
+
 
   return stop_fetch;
 }
