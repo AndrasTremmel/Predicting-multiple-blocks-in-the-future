@@ -113,6 +113,11 @@ struct LSQ_ENTRY {
   void finish(std::deque<ooo_model_instr>::iterator begin, std::deque<ooo_model_instr>::iterator end) const;
 };
 
+struct branch_prediction_pair {
+    uint8_t single_cycle;
+    uint8_t multi_cycle;
+};
+
 // cpu
 class O3_CPU : public champsim::operable
 {
@@ -228,6 +233,9 @@ public:
   void print_deadlock() override final;
 
 #include "ooo_cpu_module_decl.inc"
+
+  branch_prediction_pair predict_branch_pair(uint64_t ip);
+
 
   struct module_concept {
     virtual ~module_concept() = default;

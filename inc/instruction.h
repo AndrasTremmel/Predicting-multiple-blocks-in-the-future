@@ -48,6 +48,9 @@ struct ooo_model_instr {
   bool branch_prediction = 0;
   bool branch_mispredicted = 0; // A branch can be mispredicted even if the direction prediction is correct when the predicted target is not correct
 
+  uint8_t branch_prediction_multi = 0;
+  unsigned mispredict_penalty = 0;
+
   std::array<uint8_t, 2> asid = {std::numeric_limits<uint8_t>::max(), std::numeric_limits<uint8_t>::max()};
 
   uint8_t branch_type = NOT_BRANCH;

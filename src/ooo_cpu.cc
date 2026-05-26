@@ -286,7 +286,11 @@ bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
   // handle branch prediction for all instructions as at this point we do not know if the instruction is a branch or not
   sim_stats.total_branch_types[arch_instr.branch_type]++;
   auto [predicted_branch_target, always_taken] = impl_btb_prediction(arch_instr.ip);
-  arch_instr.branch_prediction = impl_predict_branch(arch_instr.ip) || always_taken;
+
+  auto pred_pair = predict_branch_pair(arch_instr.ip);
+  arch_instr.branch_prediction       = pred_pair.single_cycle || always_taken;
+  arch_instr.branch_prediction_multi = pred_pair.multi_cycle  || always_taken;
+
   if (arch_instr.branch_prediction == 0)
     predicted_branch_target = 0;
 
@@ -298,15 +302,106 @@ bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
     // call code prefetcher every time the branch predictor is used
     l1i->impl_prefetcher_branch_operate(arch_instr.ip, arch_instr.branch_type, predicted_branch_target);
 
-    if (predicted_branch_target != arch_instr.branch_target
-        || (((arch_instr.branch_type == BRANCH_CONDITIONAL) || (arch_instr.branch_type == BRANCH_OTHER))
-            && arch_instr.branch_taken != arch_instr.branch_prediction)) { // conditional branches are re-evaluated at decode when the target is computed
+    bool target_mispredict = (predicted_branch_target != arch_instr.branch_target);
+    bool is_conditional    = (arch_instr.branch_type == BRANCH_CONDITIONAL) || (arch_instr.branch_type == BRANCH_OTHER);
+
+    unsigned penalty = 0;
+    if (target_mispredict) {
+      penalty = BRANCH_MISPREDICT_PENALTY;
+    } else if (is_conditional) {
+      bool S = arch_instr.branch_prediction;
+      bool M = arch_instr.branch_prediction_multi;
+      bool A = arch_instr.branch_taken;
+
+      if (S == M) {
+        if (S != A) {
+          penalty = BRANCH_MISPREDICT_PENALTY;          // both wrong
+        }
+      } else {
+        if (M == A) {
+          penalty = 3;                                    // multi-cycle correct
+        } else {
+          penalty = BRANCH_MISPREDICT_PENALTY + 3;        // multi-cycle wrong
+        }
+      }
+    }
+
+    if (penalty > 0) {
       sim_stats.total_rob_occupancy_at_branch_mispredict += std::size(ROB);
       sim_stats.branch_type_misses[arch_instr.branch_type]++;
       if (!warmup) {
         fetch_resume_cycle = std::numeric_limits<uint64_t>::max();
         stop_fetch = true;
         arch_instr.branch_mispredicted = 1;
+        arch_instr.mispredict_penalty = penalty;
+      }
+    } else {
+      stop_fetch = arch_instr.branch_taken; // if correctly predicted taken, then we can't fetch anymore instructions this cycle
+    }
+
+    impl_update_btb(arch_instr.ip, arch_instr.branch_target, arch_instr.branch_taken, arch_instr.branch_type);
+    impl_last_branch_result(arch_instr.ip, arch_instr.branch_target, arch_instr.branch_taken, arch_instr.branch_type);
+  }
+
+  return stop_fetch;
+}
+
+
+bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
+{
+  bool stop_fetch = false;
+
+  // handle branch prediction for all instructions as at this point we do not know if the instruction is a branch or not
+  sim_stats.total_branch_types[arch_instr.branch_type]++;
+  auto [predicted_branch_target, always_taken] = impl_btb_prediction(arch_instr.ip);
+  uint64_t predicted_branch_target_for_single = predicted_branch_target;
+  uint64_t predicted_branch_target_for_multi = predicted_branch_target;
+
+
+  auto pred_pair = predict_branch_pair(arch_instr.ip);
+  arch_instr.branch_prediction       = pred_pair.single_cycle || always_taken;
+  arch_instr.branch_prediction_multi = pred_pair.multi_cycle  || always_taken; 
+  
+  if (arch_instr.branch_prediction == 0)
+    predicted_branch_target_for_single = 0;
+
+  if (arch_instr.branch_prediction_multi == 0)
+    predicted_branch_target_for_multi = 0;
+
+  unsigned penalty = 0;
+
+  if (arch_instr.is_branch) {
+    if constexpr (champsim::debug_print) {
+      fmt::print("[BRANCH] instr_id: {} ip: {:#x} taken: {}\n", arch_instr.instr_id, arch_instr.ip, arch_instr.branch_taken);
+    }
+
+    // call code prefetcher every time the branch predictor is used
+    l1i->impl_prefetcher_branch_operate(arch_instr.ip, arch_instr.branch_type, predicted_branch_target_for_multi);
+
+    bool multi_prediction_wrong = (predicted_branch_target_for_multi != arch_instr.branch_target
+        || (((arch_instr.branch_type == BRANCH_CONDITIONAL) || (arch_instr.branch_type == BRANCH_OTHER))
+            && arch_instr.branch_taken != arch_instr.branch_prediction_multi))
+   
+    bool single_predition_wrong = (predicted_branch_target_for_single != arch_instr.branch_target
+        || (((arch_instr.branch_type == BRANCH_CONDITIONAL) || (arch_instr.branch_type == BRANCH_OTHER)) 
+            && arch_instr.branch_taken != arch_instr.branch_prediction))
+
+    if (multi_prediction_wrong && single_prediction_wrong) {
+      penalty = NORMAL_MISPREDICTION_PENALTY;
+    } else if (multi_prediction_wrong) {
+      penalty = NORMAL_MISPREDICTION_PENALTY + MULTI_CYCLE_PREDITON_LATENCY;
+    } else {
+      penalty = MULTI_CYCLE_PREDITON_LATENCY;
+    }
+     
+    if (multi_prediction_wrong || single_prediction) {
+      sim_stats.total_rob_occupancy_at_branch_mispredict += std::size(ROB);
+      sim_stats.branch_type_misses[arch_instr.branch_type]++;
+      if (!warmup) {
+        fetch_resume_cycle = std::numeric_limits<uint64_t>::max();
+        stop_fetch = true;
+        arch_instr.branch_mispredicted = 1;
+        arch_instr.mispredict_penalty = penalty;
       }
     } else {
       stop_fetch = arch_instr.branch_taken; // if correctly predicted taken, then we can't fetch anymore instructions this cycle
@@ -319,6 +414,47 @@ bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
 
   return stop_fetch;
 }
+
+// bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
+// {
+//   bool stop_fetch = false;
+
+//   // handle branch prediction for all instructions as at this point we do not know if the instruction is a branch or not
+//   sim_stats.total_branch_types[arch_instr.branch_type]++;
+//   auto [predicted_branch_target, always_taken] = impl_btb_prediction(arch_instr.ip);
+//   arch_instr.branch_prediction = impl_predict_branch(arch_instr.ip) || always_taken;
+//   if (arch_instr.branch_prediction == 0)
+//     predicted_branch_target = 0;
+
+//   if (arch_instr.is_branch) {
+//     if constexpr (champsim::debug_print) {
+//       fmt::print("[BRANCH] instr_id: {} ip: {:#x} taken: {}\n", arch_instr.instr_id, arch_instr.ip, arch_instr.branch_taken);
+//     }
+
+//     // call code prefetcher every time the branch predictor is used
+//     l1i->impl_prefetcher_branch_operate(arch_instr.ip, arch_instr.branch_type, predicted_branch_target);
+
+//     if (predicted_branch_target != arch_instr.branch_target
+//         || (((arch_instr.branch_type == BRANCH_CONDITIONAL) || (arch_instr.branch_type == BRANCH_OTHER))
+//             && arch_instr.branch_taken != arch_instr.branch_prediction)) { // conditional branches are re-evaluated at decode when the target is computed
+//       sim_stats.total_rob_occupancy_at_branch_mispredict += std::size(ROB);
+//       sim_stats.branch_type_misses[arch_instr.branch_type]++;
+//       if (!warmup) {
+//         fetch_resume_cycle = std::numeric_limits<uint64_t>::max();
+//         stop_fetch = true;
+//         arch_instr.branch_mispredicted = 1;
+//       }
+//     } else {
+//       stop_fetch = arch_instr.branch_taken; // if correctly predicted taken, then we can't fetch anymore instructions this cycle
+//     }
+
+//     impl_update_btb(arch_instr.ip, arch_instr.branch_target, arch_instr.branch_taken, arch_instr.branch_type);
+//     impl_last_branch_result(arch_instr.ip, arch_instr.branch_target, arch_instr.branch_taken, arch_instr.branch_type);
+//   }
+
+
+//   return stop_fetch;
+// }
 
 bool O3_CPU::do_init_instruction(ooo_model_instr& arch_instr)
 {
