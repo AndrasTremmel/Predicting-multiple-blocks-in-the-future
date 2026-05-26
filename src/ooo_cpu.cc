@@ -161,22 +161,53 @@ void O3_CPU::initialize_instruction()
     if (!cut_here && current_is_branch && !current_is_taken_branch
         && (current_branch_type == BRANCH_CONDITIONAL || current_branch_type == BRANCH_OTHER)) {
       if (conditional_predicted_taken_ips.find(current_ip) != conditional_predicted_taken_ips.end()) {
-#ifdef L_BIT_OPTIMIZATION
-        // Check if this is the last branch in the cache line
-        bool is_last_branch_in_line = true;
+// #ifdef L_BIT_OPTIMIZATION
+//         // Check if this is the last branch in the cache line
+//         bool is_last_branch_in_line = true;
+//         for (auto it = input_queue.begin() + 1; it != input_queue.end(); ++it) {
+//           if ((it->ip >> LOG2_BLOCK_SIZE) != current_cache_line)
+//             break;
+//           if (it->is_branch) {
+//             is_last_branch_in_line = false;
+//             break;
+//           }
+//         }
+//         if (!is_last_branch_in_line)
+//           cut_here = true;
+// #else
+//         cut_here = true;
+// #endif
+  #ifdef L_BIT_OPTIMIZATION
+        // Only skip cutting if ALL branches after this one in the cache line
+        // are conditional not-taken branches that have NEVER been predicted taken.
+        bool all_after_are_harmless = true;
         for (auto it = input_queue.begin() + 1; it != input_queue.end(); ++it) {
           if ((it->ip >> LOG2_BLOCK_SIZE) != current_cache_line)
             break;
           if (it->is_branch) {
-            is_last_branch_in_line = false;
-            break;
+            // Any taken branch is not harmless
+            if (it->branch_taken) {
+              all_after_are_harmless = false;
+              break;
+            }
+            // Not-taken branches: only conditional ones that were never predicted taken are harmless
+            if (it->branch_type == BRANCH_CONDITIONAL || it->branch_type == BRANCH_OTHER) {
+              if (conditional_predicted_taken_ips.find(it->ip) != conditional_predicted_taken_ips.end()) {
+                all_after_are_harmless = false; // was previously predicted taken
+                break;
+              }
+            } else {
+              // Unconditional not-taken branch should not happen, but treat as not harmless
+              all_after_are_harmless = false;
+              break;
+            }
           }
         }
-        if (!is_last_branch_in_line)
+        if (!all_after_are_harmless)
           cut_here = true;
-#else
+  #else
         cut_here = true;
-#endif
+  #endif
       }
     }
 
@@ -211,21 +242,52 @@ void O3_CPU::initialize_instruction()
     if (!is_stop_branch && current_is_branch && !current_is_taken_branch
         && (current_branch_type == BRANCH_CONDITIONAL || current_branch_type == BRANCH_OTHER)) {
       if (conditional_predicted_taken_ips.find(current_ip) != conditional_predicted_taken_ips.end()) {
-#ifdef L_BIT_OPTIMIZATION
-        bool is_last_branch_in_line = true;
+// #ifdef L_BIT_OPTIMIZATION
+//         bool is_last_branch_in_line = true;
+//         for (auto it = input_queue.begin() + 1; it != input_queue.end(); ++it) {
+//           if ((it->ip >> LOG2_BLOCK_SIZE) != current_cache_line)
+//             break;
+//           if (it->is_branch) {
+//             is_last_branch_in_line = false;
+//             break;
+//           }
+//         }
+//         if (!is_last_branch_in_line)
+//           is_stop_branch = true;
+// #else
+//         is_stop_branch = true;
+// #endif
+  #ifdef L_BIT_OPTIMIZATION
+        // Only skip counting if ALL branches after this one in the cache line
+        // are conditional not-taken branches that have NEVER been predicted taken.
+        bool all_after_are_harmless = true;
         for (auto it = input_queue.begin() + 1; it != input_queue.end(); ++it) {
           if ((it->ip >> LOG2_BLOCK_SIZE) != current_cache_line)
             break;
           if (it->is_branch) {
-            is_last_branch_in_line = false;
-            break;
+            // Any taken branch is not harmless
+            if (it->branch_taken) {
+              all_after_are_harmless = false;
+              break;
+            }
+            // Not-taken branches: only conditional ones that were never predicted taken are harmless
+            if (it->branch_type == BRANCH_CONDITIONAL || it->branch_type == BRANCH_OTHER) {
+              if (conditional_predicted_taken_ips.find(it->ip) != conditional_predicted_taken_ips.end()) {
+                all_after_are_harmless = false; // was previously predicted taken
+                break;
+              }
+            } else {
+              // Unconditional not-taken branch should not happen, but treat as not harmless
+              all_after_are_harmless = false;
+              break;
+            }
           }
         }
-        if (!is_last_branch_in_line)
+        if (!all_after_are_harmless)
           is_stop_branch = true;
-#else
+  #else
         is_stop_branch = true;
-#endif
+  #endif
       }
     }
 
@@ -298,19 +360,22 @@ bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
     // call code prefetcher every time the branch predictor is used
     l1i->impl_prefetcher_branch_operate(arch_instr.ip, arch_instr.branch_type, predicted_branch_target);
 
-    if (predicted_branch_target != arch_instr.branch_target
-        || (((arch_instr.branch_type == BRANCH_CONDITIONAL) || (arch_instr.branch_type == BRANCH_OTHER))
-            && arch_instr.branch_taken != arch_instr.branch_prediction)) { // conditional branches are re-evaluated at decode when the target is computed
-      sim_stats.total_rob_occupancy_at_branch_mispredict += std::size(ROB);
-      sim_stats.branch_type_misses[arch_instr.branch_type]++;
-      if (!warmup) {
-        fetch_resume_cycle = std::numeric_limits<uint64_t>::max();
-        stop_fetch = true;
-        arch_instr.branch_mispredicted = 1;
-      }
-    } else {
-      stop_fetch = arch_instr.branch_taken; // if correctly predicted taken, then we can't fetch anymore instructions this cycle
-    }
+    // if (predicted_branch_target != arch_instr.branch_target
+    //     || (((arch_instr.branch_type == BRANCH_CONDITIONAL) || (arch_instr.branch_type == BRANCH_OTHER))
+    //         && arch_instr.branch_taken != arch_instr.branch_prediction)) { // conditional branches are re-evaluated at decode when the target is computed
+    //   sim_stats.total_rob_occupancy_at_branch_mispredict += std::size(ROB);
+    //   sim_stats.branch_type_misses[arch_instr.branch_type]++;
+    //   if (!warmup) {
+    //     fetch_resume_cycle = std::numeric_limits<uint64_t>::max();
+    //     stop_fetch = true;
+    //     arch_instr.branch_mispredicted = 1;
+    //   }
+    // } else {
+    //   stop_fetch = arch_instr.branch_taken; // if correctly predicted taken, then we can't fetch anymore instructions this cycle
+    // }
+
+    stop_fetch = arch_instr.branch_taken; // if correctly predicted taken, then we can't fetch anymore instructions this cycle
+
 
     impl_update_btb(arch_instr.ip, arch_instr.branch_target, arch_instr.branch_taken, arch_instr.branch_type);
     impl_last_branch_result(arch_instr.ip, arch_instr.branch_target, arch_instr.branch_taken, arch_instr.branch_type);
