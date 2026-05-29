@@ -13,7 +13,7 @@
 #include "msl/lru_table.h"
 #include "ooo_cpu.h"
 
-#define OPTIMIZATION_ON 0
+#define OPTIMIZATION_ON 1
 
 namespace
 {
@@ -93,12 +93,12 @@ struct mbtb_stats_t {
   uint64_t per_prev_type_correct       [N_BRANCH_TYPES] = {};
 };
 
-constexpr std::size_t BTB_SET = 2048;
+constexpr std::size_t BTB_SET = 256;
 constexpr std::size_t BTB_WAY = 4;
-constexpr std::size_t BTB_INDIRECT_SIZE = 4096;
+constexpr std::size_t BTB_INDIRECT_SIZE = 256;
 constexpr std::size_t RAS_SIZE = 64;
 constexpr std::size_t SAS_SIZE = 64;
-constexpr std::size_t CALL_SIZE_TRACKERS = 1024;
+constexpr std::size_t CALL_SIZE_TRACKERS = 256;
 
 class MultiBlockBTBContext {
  public:

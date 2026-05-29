@@ -91,6 +91,7 @@ void O3_CPU::begin_phase()
 
   actual_block_size_counter     = 0;
   actual_block_branches_counter = 0;
+  actual_block_last_was_branch = false;
 
   // reset two-block ahead counters after for each phase (so warmup cannot pollute this)
   two_block_ahead_counter       = 0;
