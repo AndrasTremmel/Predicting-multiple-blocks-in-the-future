@@ -156,7 +156,7 @@ void O3_CPU::initialize_instruction()
     if (current_is_branch)
       ++actual_block_branches_counter;
 
-    bool cut_here = current_is_taken_branch || (actual_block_size_counter == static_cast<uint64_t>(FETCH_WIDTH));
+    bool cut_here = current_is_taken_branch || (actual_block_size_counter == std::numeric_limits<uint64_t>::max());
 
     // Cut on conditional not-taken branches that were previously predicted taken
     if (!cut_here && current_is_branch && !current_is_taken_branch
@@ -295,7 +295,7 @@ void O3_CPU::initialize_instruction()
     if (is_stop_branch)
       ++two_block_ahead_stop_branches;
 
-    if (two_block_ahead_stop_branches == 2 || two_block_ahead_counter == static_cast<uint64_t>(FETCH_WIDTH)) {
+    if (two_block_ahead_stop_branches == 2 || two_block_ahead_counter == std::numeric_limits<uint64_t>::max()) {
       sim_stats.two_block_ahead_size_distribution[two_block_ahead_counter]++;
       two_block_ahead_counter       = 0;
       two_block_ahead_stop_branches = 0;
