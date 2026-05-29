@@ -13,7 +13,7 @@
 #include "msl/lru_table.h"
 #include "ooo_cpu.h"
 
-#define OPTIMIZATION_ON 1
+#define OPTIMIZATION_ON 0
 
 namespace
 {
