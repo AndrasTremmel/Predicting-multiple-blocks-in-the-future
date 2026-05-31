@@ -77,48 +77,6 @@ struct Branch_Type {
   bool is_indirect;
 };
 
-// template <typename T>
-// class Circular_Buffer {
-//  public:
-//   Circular_Buffer(unsigned max_size)
-//       : buffer_(1 << get_min_num_bits_to_represent(max_size)),
-//         buffer_access_mask_(buffer_.size() - 1),
-//         back_(-1), front_(-1), size_(0) {}
-//   T& operator[](uint32_t id) {
-//     assert(back_ - id < back_ - front_);
-//     return buffer_[id & buffer_access_mask_];
-//   }
-//   uint32_t back_id() const { return back_; }
-//   void deallocate_after(uint32_t id) {
-//     assert(back_ - id < back_ - front_);
-//     size_ -= (back_ - id);
-//     back_ = id;
-//   }
-//   void deallocate_and_after(uint32_t id) {
-//     assert((back_ - id + 1) < (back_ - front_ + 1));
-//     size_ -= (back_ - id + 1);
-//     back_ = id - 1;
-//   }
-//   uint32_t allocate_back() {
-//     assert(size_ < buffer_.size());
-//     back_ += 1;
-//     size_ += 1;
-//     return back_;
-//   }
-//   void deallocate_front(uint32_t pop_id) {
-//     front_ += 1;
-//     assert(pop_id == front_);
-//     assert(size_ > 0);
-//     size_ -= 1;
-//   }
-//  private:
-//   std::vector<T> buffer_;
-//   uint32_t buffer_access_mask_;
-//   uint32_t back_;
-//   uint32_t front_;
-//   uint32_t size_;
-// };
-
 
 template <typename T>
 class CircularBuffer {
