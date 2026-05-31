@@ -891,6 +891,20 @@
 // #endif  // SPEC_TAGE_SC_L_TAGE_HPP_
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 /* Copyright 2020 HPS/SAFARI Research Groups ... */
 
 #ifndef SPEC_TAGE_SC_L_TAGE_HPP_
@@ -1116,6 +1130,7 @@ struct Tage_Prediction_Info {
   int64_t path_history_commit_checkpoint;
   int8_t longest_match_counter_at_pred = 0;
   int8_t alt_match_counter_at_pred = 0;
+  uint64_t br_pc_used_for_pred_gen = 0;
 };
 
 template <class TAGE_CONFIG>
@@ -1418,7 +1433,7 @@ class Tage {
       matched_entry.useful.increment();
     }
 
-    // ---- Statistics (only for conditional branches) ----
+    // ---- Statistics (only counted for conditional branches) ----
     if (count_stats) {
       stats_.commits++;
       stats_.total_predictions++;
@@ -1727,5 +1742,6 @@ void Tage<TAGE_CONFIG>::shift_tage_useful_bits(Tagged_Entry* table, int size) {
 }  // namespace tagescl
 
 #endif  // SPEC_TAGE_SC_L_TAGE_HPP_
+
 
 
