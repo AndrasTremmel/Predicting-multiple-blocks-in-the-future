@@ -54,21 +54,34 @@ void champsim::plain_printer::print(O3_CPU::stats_type stats)
 
   // Stat 1: (branches in block, ends with branch)
   fmt::print(stream, "{}  Distribution by (branches, ends_with_branch):\n", stats.name);
-  for (const auto& [key, count] : stats.fetch_block_branch_distribution) {
+  for (const auto& [key, count] : stats.one_block_ahead_branch_distribution) {
     fmt::print(stream, "{}    branches: {:2d}  ends_with_branch: {}  count: {:10d}\n",
                stats.name, key.first, key.second ? "yes" : " no", count);
   }
 
-  // Stat 2: actual fetch block sizes
-  fmt::print(stream, "{}  Actual fetch block size distribution:\n", stats.name);
-  for (const auto& [size, count] : stats.fetch_block_size_distribution) {
+  // Stat 2: one-block ahead fetch block sizes (cut at 1st stop branch or FETCH_WIDTH)
+  fmt::print(stream, "{}  One-block ahead fetch block size distribution (cut at 1st stop branch or FETCH_WIDTH):\n", stats.name);
+  for (const auto& [size, count] : stats.one_block_ahead_size_distribution) {
     fmt::print(stream, "{}    size: {:2d}  count: {:10d}\n", stats.name, size, count);
   }
 
   // Stat 3: two-block ahead fetch block sizes (cut at 2nd stop branch or FETCH_WIDTH)
-  fmt::print(stream, "{}  Two-block ahead size distribution (cut at 2nd stop branch or FETCH_WIDTH):\n", stats.name);
+  fmt::print(stream, "{}  Two-block ahead fetch block size distribution (cut at 2nd stop branch or FETCH_WIDTH):\n", stats.name);
   for (const auto& [size, count] : stats.two_block_ahead_size_distribution) {
     fmt::print(stream, "{}    size: {:2d}  count: {:10d}\n", stats.name, size, count);
+  }
+
+  // Stat 4: Up to taken branch fetch block sizes (no L-bit, no cache line boundary)
+  fmt::print(stream, "{}  Up to taken branch fetch block size distribution (cut at 1st taken branch or FETCH_WIDTH):\n", stats.name);
+  for (const auto& [size, count] : stats.up_to_taken_branch_size_distribution) {
+    fmt::print(stream, "{}    size: {:2d}  count: {:10d}\n", stats.name, size, count);
+  }
+
+  // Stat 5: Up to taken branch fetch block branch distribution
+  fmt::print(stream, "{}  Up to taken branch fetch block branch distribution (cut at 1st taken branch or FETCH_WIDTH):\n", stats.name);
+  for (const auto& [key, count] : stats.up_to_taken_branch_branch_distribution) {
+    fmt::print(stream, "{}    branches: {:2d}  ends_with_branch: {}  count: {:10d}\n",
+               stats.name, key.first, key.second ? "yes" : " no", count);
   }
 
   

@@ -89,13 +89,18 @@ void O3_CPU::begin_phase()
   stats.begin_cycles = current_cycle;
   sim_stats = stats;
 
-  actual_block_size_counter     = 0;
-  actual_block_branches_counter = 0;
-  actual_block_last_was_branch = false;
+  one_block_ahead_block_size_counter     = 0;
+  one_block_ahead_branches_counter = 0;
+  one_block_ahead_last_was_branch = false;
 
   // reset two-block ahead counters after for each phase (so warmup cannot pollute this)
   two_block_ahead_counter       = 0;
   two_block_ahead_stop_branches = 0;
+
+  // reset pure fetch block counters
+  up_to_taken_branch_block_size_counter     = 0;
+  up_to_taken_branch_block_branches_counter = 0;
+  up_to_taken_branch_block_last_was_branch  = false;
 
   // Also reset the conditional-branch taken-history so phase stats stay clean.
   conditional_predicted_taken_ips.clear();
@@ -139,45 +144,30 @@ void O3_CPU::initialize_instruction()
     //        that was previously predicted taken, or FETCH_WIDTH, or optionally
     //        cache line boundary).
 #ifdef ACTUAL_BLOCK_RESET_AT_CACHE_LINE
-    if (actual_block_size_counter > 0 && current_cache_line != actual_block_cache_line) {
-      sim_stats.fetch_block_branch_distribution[{actual_block_branches_counter, actual_block_last_was_branch}]++;
-      sim_stats.fetch_block_size_distribution[actual_block_size_counter]++;
-      actual_block_size_counter     = 0;
-      actual_block_branches_counter = 0;
-      actual_block_last_was_branch  = false;
+    if (one_block_ahead_block_size_counter > 0 && current_cache_line != one_block_ahead_cache_line) {
+      sim_stats.one_block_ahead_branch_distribution[{one_block_ahead_branches_counter, one_block_ahead_last_was_branch}]++;
+      sim_stats.one_block_ahead_size_distribution[one_block_ahead_block_size_counter]++;
+      one_block_ahead_block_size_counter     = 0;
+      one_block_ahead_branches_counter = 0;
+      one_block_ahead_last_was_branch  = false;
     }
 #endif
-    if (actual_block_size_counter == 0) {
-      actual_block_cache_line = current_cache_line;
+    if (one_block_ahead_block_size_counter == 0) {
+      one_block_ahead_cache_line = current_cache_line;
     }
 
-    ++actual_block_size_counter;
-    actual_block_last_was_branch = current_is_branch;
+    ++one_block_ahead_block_size_counter;
+    one_block_ahead_last_was_branch = current_is_branch;
     if (current_is_branch)
-      ++actual_block_branches_counter;
+      ++one_block_ahead_branches_counter;
 
-    bool cut_here = current_is_taken_branch || (actual_block_size_counter == std::numeric_limits<uint64_t>::max());
+    bool cut_here = current_is_taken_branch || (one_block_ahead_block_size_counter == std::numeric_limits<uint64_t>::max());
 
     // Cut on conditional not-taken branches that were previously predicted taken
     if (!cut_here && current_is_branch && !current_is_taken_branch
         && (current_branch_type == BRANCH_CONDITIONAL || current_branch_type == BRANCH_OTHER)) {
       if (conditional_predicted_taken_ips.find(current_ip) != conditional_predicted_taken_ips.end()) {
-// #ifdef L_BIT_OPTIMIZATION
-//         // Check if this is the last branch in the cache line
-//         bool is_last_branch_in_line = true;
-//         for (auto it = input_queue.begin() + 1; it != input_queue.end(); ++it) {
-//           if ((it->ip >> LOG2_BLOCK_SIZE) != current_cache_line)
-//             break;
-//           if (it->is_branch) {
-//             is_last_branch_in_line = false;
-//             break;
-//           }
-//         }
-//         if (!is_last_branch_in_line)
-//           cut_here = true;
-// #else
-//         cut_here = true;
-// #endif
+
   #ifdef L_BIT_OPTIMIZATION
         // Only skip cutting if ALL branches after this one in the cache line
         // are conditional not-taken branches that have NEVER been predicted taken.
@@ -213,11 +203,11 @@ void O3_CPU::initialize_instruction()
     }
 
     if (cut_here) {
-      sim_stats.fetch_block_branch_distribution[{actual_block_branches_counter, actual_block_last_was_branch}]++;
-      sim_stats.fetch_block_size_distribution[actual_block_size_counter]++;
-      actual_block_size_counter     = 0;
-      actual_block_branches_counter = 0;
-      actual_block_last_was_branch  = false;
+      sim_stats.one_block_ahead_branch_distribution[{one_block_ahead_branches_counter, one_block_ahead_last_was_branch}]++;
+      sim_stats.one_block_ahead_size_distribution[one_block_ahead_block_size_counter]++;
+      one_block_ahead_block_size_counter     = 0;
+      one_block_ahead_branches_counter = 0;
+      one_block_ahead_last_was_branch  = false;
     }
 
 
@@ -243,21 +233,7 @@ void O3_CPU::initialize_instruction()
     if (!is_stop_branch && current_is_branch && !current_is_taken_branch
         && (current_branch_type == BRANCH_CONDITIONAL || current_branch_type == BRANCH_OTHER)) {
       if (conditional_predicted_taken_ips.find(current_ip) != conditional_predicted_taken_ips.end()) {
-// #ifdef L_BIT_OPTIMIZATION
-//         bool is_last_branch_in_line = true;
-//         for (auto it = input_queue.begin() + 1; it != input_queue.end(); ++it) {
-//           if ((it->ip >> LOG2_BLOCK_SIZE) != current_cache_line)
-//             break;
-//           if (it->is_branch) {
-//             is_last_branch_in_line = false;
-//             break;
-//           }
-//         }
-//         if (!is_last_branch_in_line)
-//           is_stop_branch = true;
-// #else
-//         is_stop_branch = true;
-// #endif
+
   #ifdef L_BIT_OPTIMIZATION
         // Only skip counting if ALL branches after this one in the cache line
         // are conditional not-taken branches that have NEVER been predicted taken.
@@ -301,6 +277,20 @@ void O3_CPU::initialize_instruction()
       two_block_ahead_stop_branches = 0;
     }
 
+
+    // STATS: up to taken branch fetch block (cut on 1st truly taken branch or FETCH_WIDTH)
+    ++up_to_taken_branch_block_size_counter;
+    up_to_taken_branch_block_last_was_branch = current_is_branch;
+    if (current_is_branch)
+      ++up_to_taken_branch_block_branches_counter;
+
+    if (current_is_taken_branch || up_to_taken_branch_block_size_counter == std::numeric_limits<uint64_t>::max()) {
+      sim_stats.up_to_taken_branch_branch_distribution[{up_to_taken_branch_block_branches_counter, up_to_taken_branch_block_last_was_branch}]++;
+      sim_stats.up_to_taken_branch_size_distribution[up_to_taken_branch_block_size_counter]++;
+      up_to_taken_branch_block_size_counter     = 0;
+      up_to_taken_branch_block_branches_counter = 0;
+      up_to_taken_branch_block_last_was_branch  = false;
+    }
 
     // Track conditional branches that have been predicted taken at least once.
     // This is used by the actual fetch block counter to cut on not-taken
