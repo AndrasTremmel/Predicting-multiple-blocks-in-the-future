@@ -41,6 +41,7 @@ struct Tage_SC_L_Prediction_Info {
   bool updated_history;
 };
 
+
 class Tage_SC_L_Base {
  public:
   virtual uint32_t get_new_branch_id() = 0;
@@ -53,6 +54,8 @@ class Tage_SC_L_Base {
   virtual void commit_state_at_retire(uint32_t branch_id, uint64_t br_pc,
                                       Branch_Type br_type, bool resolve_dir,
                                       uint64_t br_target) = 0;
+  virtual const TageStats& get_stats() const = 0;
+  virtual void print_stats() const = 0;
 };
 
 /* Interface functions:
@@ -95,6 +98,11 @@ class Tage_SC_L : public Tage_SC_L_Base {
   void commit_state_at_retire(uint32_t branch_id, uint64_t br_pc,
                               Branch_Type br_type, bool resolve_dir,
                               uint64_t br_target) override;
+  const TageStats& get_stats() const override { return tage_.get_stats(); }
+  void print_stats() const override {
+    tage_.get_stats().print("BASELINE TAGE-SC-L");
+  }
+
 
 
  private:
