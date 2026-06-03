@@ -55,6 +55,8 @@
 // The actual fetch block counters will reset when a new cache line is reached.
 #define ACTUAL_BLOCK_RESET_AT_CACHE_LINE
 
+#define TWO_BLOCK_AHEAD_FETCH
+
 
 enum STATUS { INFLIGHT = 1, COMPLETED = 2 };
 
@@ -98,6 +100,16 @@ struct cpu_stats {
 
   uint64_t instrs() const { return end_instrs - begin_instrs; }
   uint64_t cycles() const { return end_cycles - begin_cycles; }
+};
+
+struct btb_prediction_pair {
+    std::pair<uint64_t, uint8_t> single_cycle; // {target, always_taken}
+    std::pair<uint64_t, uint8_t> multi_cycle;  // {target, always_taken}
+};
+
+struct branch_prediction_pair {
+    uint8_t single_cycle;
+    uint8_t multi_cycle;
 };
 
 struct LSQ_ENTRY {
@@ -189,6 +201,10 @@ public:
   uint64_t up_to_taken_branch_block_branches_counter = 0;
   bool     up_to_taken_branch_block_last_was_branch  = false;
 
+#ifdef TWO_BLOCK_AHEAD_FETCH
+  uint8_t fetch_cycle_taken_branches = 0;
+#endif
+
   const long IN_QUEUE_SIZE = 2 * FETCH_WIDTH;
   std::deque<ooo_model_instr> input_queue;
 
@@ -236,6 +252,9 @@ public:
   void print_deadlock() override final;
 
 #include "ooo_cpu_module_decl.inc"
+  btb_prediction_pair predict_btb_pair(uint64_t ip);
+  branch_prediction_pair predict_branch_pair(uint64_t ip);
+
 
   struct module_concept {
     virtual ~module_concept() = default;
