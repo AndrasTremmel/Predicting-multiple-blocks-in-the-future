@@ -27,17 +27,16 @@ static ChampsimTageScl& get_predictor(const O3_CPU* cpu) {
   assert(false);
 }
 
-
-class BaselineTagePrinter {
+class MultiBlockTagePrinter {
  public:
-  ~BaselineTagePrinter() {
+  ~MultiBlockTagePrinter() {
     for (auto& p : predictors) {
       p.impl.print_stats();
     }
     std::cerr << std::flush;
   }
 };
-static BaselineTagePrinter baseline_tage_printer;
+static MultiBlockTagePrinter multi_block_tage_printer;
 
 
 void O3_CPU::initialize_branch_predictor() {

@@ -87,11 +87,14 @@ struct cpu_stats {
 
   // --- Fetch block statistics ---
   // Stat 1: key = (num_branches_in_block, ends_with_branch), value = count
-  std::map<std::pair<uint64_t, bool>, uint64_t> fetch_block_branch_distribution;
+  std::map<std::pair<uint64_t, bool>, uint64_t> one_block_ahead_branch_distribution;
   // Stat 2: key = actual fetch block size, value = count
-  std::map<uint64_t, uint64_t> fetch_block_size_distribution;
+  std::map<uint64_t, uint64_t> one_block_ahead_size_distribution;
   // Stat 3: key = two-block ahead size (cut at 2nd stop branch or FETCH_WIDTH)
   std::map<uint64_t, uint64_t> two_block_ahead_size_distribution;
+  // Stat 4: pure fetch block (no L-bit, no cache line boundary, cut at 1st taken branch or FETCH_WIDTH)
+  std::map<std::pair<uint64_t, bool>, uint64_t> up_to_taken_branch_branch_distribution;
+  std::map<uint64_t, uint64_t> up_to_taken_branch_size_distribution;
 
   uint64_t instrs() const { return end_instrs - begin_instrs; }
   uint64_t cycles() const { return end_cycles - begin_cycles; }
@@ -168,18 +171,23 @@ public:
   uint64_t fetch_resume_cycle = 0;
 
   
-  uint64_t actual_block_size_counter     = 0;
-  uint64_t actual_block_branches_counter = 0;
-  bool     actual_block_last_was_branch  = false;
-  uint64_t actual_block_cache_line       = 0;   // cache line of the first instr in the current actual block
+  uint64_t one_block_ahead_block_size_counter     = 0;
+  uint64_t one_block_ahead_branches_counter = 0;
+  bool     one_block_ahead_last_was_branch  = false;
+  uint64_t one_block_ahead_cache_line       = 0;   // cache line of the first instr in the current actual block
 
   uint64_t two_block_ahead_counter         = 0;
   uint64_t two_block_ahead_stop_branches   = 0; // number of stop branches counted in current two-block ahead block
   uint64_t two_block_ahead_cache_line      = 0; // cache line of the first instr in the current two-block ahead block
+  
   // Conditional branch IPs that have been predicted taken at least once.
   // Used by the hypothetical-block counter to decide whether a not-taken
   // conditional branch should cut the block.
   std::unordered_set<uint64_t> conditional_predicted_taken_ips;
+
+  uint64_t up_to_taken_branch_block_size_counter     = 0;
+  uint64_t up_to_taken_branch_block_branches_counter = 0;
+  bool     up_to_taken_branch_block_last_was_branch  = false;
 
   const long IN_QUEUE_SIZE = 2 * FETCH_WIDTH;
   std::deque<ooo_model_instr> input_queue;

@@ -173,9 +173,7 @@ void Tage_SC_L<CONFIG>::commit_state_at_retire(uint32_t branch_id,
   if (prediction_info.updated_history) {
     tage_.commit_state_at_retire(prediction_info.tage);
     prediction_info_buffer_.deallocate_front(branch_id);
-
   }
-  
 }
 
 template <class CONFIG>

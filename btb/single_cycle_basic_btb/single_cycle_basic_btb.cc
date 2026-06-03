@@ -20,11 +20,11 @@ enum class branch_info {
   CONDITIONAL,
 };
 
-constexpr std::size_t BTB_SET = 2048;
+constexpr std::size_t BTB_SET = 256;
 constexpr std::size_t BTB_WAY = 4;
-constexpr std::size_t BTB_INDIRECT_SIZE = 4096;
+constexpr std::size_t BTB_INDIRECT_SIZE = 256;
 constexpr std::size_t RAS_SIZE = 64;
-constexpr std::size_t CALL_SIZE_TRACKERS = 1024;
+constexpr std::size_t CALL_SIZE_TRACKERS = 256;
 
 // -------- per-branch-type indexing -----------------------------------------
 constexpr int N_BRANCH_TYPES = 7;
