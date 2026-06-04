@@ -98,9 +98,9 @@ constexpr std::size_t CALL_SIZE_TRACKERS = 256;
 
 class MultiBlockBTBContext {
  public:
-  std::map<O3_CPU*, champsim::msl::lru_table<<mbtb_entry_t>> MBTB;
+  std::map<O3_CPU*, champsim::msl::lru_table<mbtb_entry_t>> MBTB;
   std::map<O3_CPU*, std::array<uint64_t, BTB_INDIRECT_SIZE>> INDIRECT_BTB;
-  std::map<O3_CPU*, std::bitset<<champsim::lg2(BTB_INDIRECT_SIZE)>> CONDITIONAL_HISTORY;
+  std::map<O3_CPU*, std::bitset<champsim::lg2(BTB_INDIRECT_SIZE)>> CONDITIONAL_HISTORY;
   std::map<O3_CPU*, std::deque<uint64_t>> RAS;
   std::map<O3_CPU*, std::deque<sas_record_t>> SAS;
   std::map<O3_CPU*, std::array<uint64_t, CALL_SIZE_TRACKERS>> CALL_SIZE;
@@ -175,7 +175,7 @@ static MultiBlockBTBContext g_ctx;
 
 void initialize_btb(O3_CPU* cpu)
 {
-  g_ctx.MBTB.insert({cpu, champsim::msl::lru_table<<mbtb_entry_t>{BTB_SET, BTB_WAY}});
+  g_ctx.MBTB.insert({cpu, champsim::msl::lru_table<mbtb_entry_t>{BTB_SET, BTB_WAY}});
   std::fill(std::begin(g_ctx.INDIRECT_BTB[cpu]), std::end(g_ctx.INDIRECT_BTB[cpu]), 0);
   std::fill(std::begin(g_ctx.CALL_SIZE[cpu]), std::end(g_ctx.CALL_SIZE[cpu]), 4);
   g_ctx.CONDITIONAL_HISTORY[cpu] = 0;
@@ -526,9 +526,9 @@ constexpr std::size_t CALL_SIZE_TRACKERS = 1024;
 
 class MultiBlockBTBContext {
  public:
-  std::map<O3_CPU*, champsim::msl::lru_table<<mbtb_entry_t>> MBTB;
+  std::map<O3_CPU*, champsim::msl::lru_table<mbtb_entry_t>> MBTB;
   std::map<O3_CPU*, std::array<uint64_t, BTB_INDIRECT_SIZE>> INDIRECT_BTB;
-  std::map<O3_CPU*, std::bitset<<champsim::lg2(BTB_INDIRECT_SIZE)>> CONDITIONAL_HISTORY;
+  std::map<O3_CPU*, std::bitset<champsim::lg2(BTB_INDIRECT_SIZE)>> CONDITIONAL_HISTORY;
   std::map<O3_CPU*, std::deque<uint64_t>> RAS;
   std::map<O3_CPU*, std::deque<sas_record_t>> SAS;
   std::map<O3_CPU*, std::array<uint64_t, CALL_SIZE_TRACKERS>> CALL_SIZE;
@@ -603,7 +603,7 @@ static MultiBlockBTBContext g_ctx;
 
 void initialize_btb(O3_CPU* cpu)
 {
-  g_ctx.MBTB.insert({cpu, champsim::msl::lru_table<<mbtb_entry_t>{BTB_SET, BTB_WAY}});
+  g_ctx.MBTB.insert({cpu, champsim::msl::lru_table<mbtb_entry_t>{BTB_SET, BTB_WAY}});
   std::fill(std::begin(g_ctx.INDIRECT_BTB[cpu]), std::end(g_ctx.INDIRECT_BTB[cpu]), 0);
   std::fill(std::begin(g_ctx.CALL_SIZE[cpu]), std::end(g_ctx.CALL_SIZE[cpu]), 4);
   g_ctx.CONDITIONAL_HISTORY[cpu] = 0;

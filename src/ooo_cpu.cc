@@ -31,6 +31,7 @@
 #include <fmt/ranges.h>
 
 #define MULTI_CYCLE_PREDICTOR_LATENCY 3
+#define BRANCH_MISPREDICTION_PENALTY  15
 
 std::chrono::seconds elapsed_time();
 
@@ -124,10 +125,8 @@ void O3_CPU::end_phase(unsigned finished_cpu)
 
 void O3_CPU::initialize_instruction()
 {
-  auto instrs_to_read_this_cycle = std::min(FETCH_WIDTH, static_cast<long>(IFETCH_BUFFER_SIZE - std::size(IFETCH_BUFFER)));
-
 #ifdef TWO_BLOCK_AHEAD_FETCH
-  auto max_fetch_budget = 2 * FETCH_WIDTH;
+  auto max_fetch_budget = FETCH_WIDTH;
 #else
   auto max_fetch_budget = FETCH_WIDTH;
 #endif
@@ -390,11 +389,11 @@ bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
     if (single_wrong || multi_wrong) {
         if (arch_instr.branch_prediction == arch_instr.branch_prediction_multi) {
             // Single and multi agree → both wrong (because at least one is wrong)
-            penalty = BRANCH_MISPREDICT_PENALTY;                 // N
+            penalty = BRANCH_MISPREDICTION_PENALTY;                 // N
         } else {
             // They differ → penalty depends on whether multi is correct
             penalty = multi_wrong
-                ? BRANCH_MISPREDICT_PENALTY + MULTI_CYCLE_PREDICTOR_LATENCY   // multi wrong  → N + 3
+                ? BRANCH_MISPREDICTION_PENALTY + MULTI_CYCLE_PREDICTOR_LATENCY   // multi wrong  → N + 3
                 : MULTI_CYCLE_PREDICTOR_LATENCY;                               // multi correct → 3
         }
     }

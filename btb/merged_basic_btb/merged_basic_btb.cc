@@ -84,9 +84,9 @@ struct btb_stats_t {
 
 class BaselineBTBContext {
  public:
-  std::map<O3_CPU*, champsim::msl::lru_table<<btb_entry_t>> BTB;
+  std::map<O3_CPU*, champsim::msl::lru_table<btb_entry_t>> BTB;
   std::map<O3_CPU*, std::array<uint64_t, BTB_INDIRECT_SIZE>> INDIRECT_BTB;
-  std::map<O3_CPU*, std::bitset<<champsim::lg2(BTB_INDIRECT_SIZE)>> CONDITIONAL_HISTORY;
+  std::map<O3_CPU*, std::bitset<champsim::lg2(BTB_INDIRECT_SIZE)>> CONDITIONAL_HISTORY;
   std::map<O3_CPU*, std::deque<uint64_t>> RAS;
   std::map<O3_CPU*, std::array<uint64_t, CALL_SIZE_TRACKERS>> CALL_SIZE;
   std::map<O3_CPU*, std::deque<pending_btb_pred_t>> PRED_QUEUE;
@@ -152,7 +152,7 @@ static BaselineBTBContext g_ctx;
 
 void initialize_btb(O3_CPU* cpu)
 {
-  g_ctx.BTB.insert({cpu, champsim::msl::lru_table<<btb_entry_t>{BTB_SET, BTB_WAY}});
+  g_ctx.BTB.insert({cpu, champsim::msl::lru_table<btb_entry_t>{BTB_SET, BTB_WAY}});
   std::fill(std::begin(g_ctx.INDIRECT_BTB[cpu]), std::end(g_ctx.INDIRECT_BTB[cpu]), 0);
   std::fill(std::begin(g_ctx.CALL_SIZE[cpu]), std::end(g_ctx.CALL_SIZE[cpu]), 4);
   g_ctx.CONDITIONAL_HISTORY[cpu] = 0;
@@ -372,9 +372,9 @@ struct btb_stats_t {
 
 class BaselineBTBContext {
  public:
-  std::map<O3_CPU*, champsim::msl::lru_table<<btb_entry_t>> BTB;
+  std::map<O3_CPU*, champsim::msl::lru_table<btb_entry_t>> BTB;
   std::map<O3_CPU*, std::array<uint64_t, BTB_INDIRECT_SIZE>> INDIRECT_BTB;
-  std::map<O3_CPU*, std::bitset<<champsim::lg2(BTB_INDIRECT_SIZE)>> CONDITIONAL_HISTORY;
+  std::map<O3_CPU*, std::bitset<champsim::lg2(BTB_INDIRECT_SIZE)>> CONDITIONAL_HISTORY;
   std::map<O3_CPU*, std::deque<uint64_t>> RAS;
   std::map<O3_CPU*, std::array<uint64_t, CALL_SIZE_TRACKERS>> CALL_SIZE;
   std::map<O3_CPU*, std::deque<pending_btb_pred_t>> PRED_QUEUE;
@@ -440,7 +440,7 @@ static BaselineBTBContext g_ctx;
 
 void initialize_btb(O3_CPU* cpu)
 {
-  g_ctx.BTB.insert({cpu, champsim::msl::lru_table<<btb_entry_t>{BTB_SET, BTB_WAY}});
+  g_ctx.BTB.insert({cpu, champsim::msl::lru_table<btb_entry_t>{BTB_SET, BTB_WAY}});
   std::fill(std::begin(g_ctx.INDIRECT_BTB[cpu]), std::end(g_ctx.INDIRECT_BTB[cpu]), 0);
   std::fill(std::begin(g_ctx.CALL_SIZE[cpu]), std::end(g_ctx.CALL_SIZE[cpu]), 4);
   g_ctx.CONDITIONAL_HISTORY[cpu] = 0;

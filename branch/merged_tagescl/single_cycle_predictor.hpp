@@ -9,7 +9,7 @@ public:
         : SIZE(size),
           ASSOC(assoc),
           NUM_SETS(size / assoc),
-          sets(NUM_SETS, std::vector<<Entry>(ASSOC)),
+          sets(NUM_SETS, std::vector<Entry>(ASSOC)),
           lru(NUM_SETS, std::vector<int>(ASSOC, 0)) {}
 
     // Return true => predicted taken, false => predicted not-taken
@@ -53,7 +53,7 @@ private:
     size_t SIZE;
     size_t ASSOC;
     size_t NUM_SETS;
-    std::vector<std::vector<<Entry>> sets;
+    std::vector<std::vector<Entry>> sets;
     std::vector<std::vector<int>> lru;
 
     size_t index(uint64_t ip) const {
