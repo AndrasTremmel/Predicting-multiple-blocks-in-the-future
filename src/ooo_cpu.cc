@@ -30,8 +30,8 @@
 #include <fmt/core.h>
 #include <fmt/ranges.h>
 
-#define MULTI_CYCLE_PREDICTOR_LATENCY 3
-#define BRANCH_MISPREDICTION_PENALTY  15
+#define MULTI_CYCLE_PREDICTOR_LATENCY 4
+#define BRANCH_MISPREDICTION_PENALTY  16
 
 std::chrono::seconds elapsed_time();
 
@@ -120,13 +120,67 @@ void O3_CPU::end_phase(unsigned finished_cpu)
     finish_phase_cycle = current_cycle;
 
     roi_stats = sim_stats;
+
+
+    auto pct = [](uint64_t num, uint64_t den) -> double {
+      return den ? (100.0 * static_cast<double>(num) / static_cast<double>(den)) : 0.0;
+    };
+
+    fmt::print("\n========== PREDICTOR ACCURACY (CPU {}) ==========\n", cpu);
+    fmt::print("Single-cycle overall:    {} / {} ({:.4f}%)\n",
+               roi_stats.sc_correct, roi_stats.sc_total,
+               pct(roi_stats.sc_correct, roi_stats.sc_total));
+    fmt::print("Multi-cycle  overall:    {} / {} ({:.4f}%)\n",
+               roi_stats.mc_correct, roi_stats.mc_total,
+               pct(roi_stats.mc_correct, roi_stats.mc_total));
+    fmt::print("Single-cycle direction:  {} / {} ({:.4f}%)\n",
+               roi_stats.sc_dir_correct, roi_stats.sc_dir_total,
+               pct(roi_stats.sc_dir_correct, roi_stats.sc_dir_total));
+    fmt::print("Multi-cycle  direction:  {} / {} ({:.4f}%)\n",
+               roi_stats.mc_dir_correct, roi_stats.mc_dir_total,
+               pct(roi_stats.mc_dir_correct, roi_stats.mc_dir_total));
+    fmt::print("Single-cycle BTB target: {} / {} ({:.4f}%)\n",
+               roi_stats.sc_btb_correct, roi_stats.sc_btb_total,
+               pct(roi_stats.sc_btb_correct, roi_stats.sc_btb_total));
+    fmt::print("Multi-cycle  BTB target: {} / {} ({:.4f}%)\n",
+               roi_stats.mc_btb_correct, roi_stats.mc_btb_total,
+               pct(roi_stats.mc_btb_correct, roi_stats.mc_btb_total));
+    fmt::print("==================================================\n\n");
+
+    fmt::print("\n--- Direction predictor agreement ---\n");
+    fmt::print("Both correct:                {}\n", roi_stats.dir_both_correct);
+    fmt::print("Both wrong:                  {}\n", roi_stats.dir_both_wrong);
+    fmt::print("Single correct, Multi wrong: {}\n", roi_stats.dir_sc_correct_mc_wrong);
+    fmt::print("Multi correct, Single wrong: {}\n", roi_stats.dir_mc_correct_sc_wrong);
+
+    fmt::print("\n--- BTB target agreement ---\n");
+    fmt::print("Both correct:                {}\n", roi_stats.btb_both_correct);
+    fmt::print("Both wrong:                  {}\n", roi_stats.btb_both_wrong);
+    fmt::print("Single correct, Multi wrong: {}\n", roi_stats.btb_sc_correct_mc_wrong);
+    fmt::print("Multi correct, Single wrong: {}\n", roi_stats.btb_mc_correct_sc_wrong);
+    fmt::print("==================================================\n\n");
+
+
+
+    if (roi_stats.mispredict_penalty_count > 0) {
+      double avg_L = static_cast<double>(roi_stats.mispredict_penalty_latency_sum)
+                   / static_cast<double>(roi_stats.mispredict_penalty_count);
+      fmt::print("\n========== MISPREDICTION PENALTY LATENCY ==========\n");
+      fmt::print("Total mispredictions measured:     {}\n", roi_stats.mispredict_penalty_count);
+      fmt::print("Handled at decode:                 {}\n", roi_stats.mispredict_penalty_at_decode);
+      fmt::print("Handled at execute:                {}\n", roi_stats.mispredict_penalty_at_execute);
+      fmt::print("Average pipeline-fill latency L:   {:.2f} cycles\n", avg_L);
+      fmt::print("Effective total penalty (L+N):     {:.2f} cycles  (N={})\n",
+                 avg_L + static_cast<double>(BRANCH_MISPREDICTION_PENALTY), BRANCH_MISPREDICTION_PENALTY);
+      fmt::print("==================================================\n\n");
+    }
   }
 }
 
 void O3_CPU::initialize_instruction()
 {
 #ifdef TWO_BLOCK_AHEAD_FETCH
-  auto max_fetch_budget = FETCH_WIDTH;
+  auto max_fetch_budget = 2 * FETCH_WIDTH;
 #else
   auto max_fetch_budget = FETCH_WIDTH;
 #endif
@@ -385,6 +439,39 @@ bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
     bool single_wrong = single_target_wrong || single_dir_wrong;
     bool multi_wrong  = multi_target_wrong  || multi_dir_wrong;
 
+
+    // ---- Accumulate accuracy statistics ----
+    ++sim_stats.sc_total;
+    ++sim_stats.mc_total;
+    if (!single_wrong) ++sim_stats.sc_correct;
+    if (!multi_wrong)  ++sim_stats.mc_correct;
+
+    ++sim_stats.sc_dir_total;
+    ++sim_stats.mc_dir_total;
+    if (!single_dir_wrong) ++sim_stats.sc_dir_correct;
+    if (!multi_dir_wrong)  ++sim_stats.mc_dir_correct;
+
+    ++sim_stats.sc_btb_total;
+    ++sim_stats.mc_btb_total;
+    if (!single_target_wrong) ++sim_stats.sc_btb_correct;
+    if (!multi_target_wrong)  ++sim_stats.mc_btb_correct;
+
+
+    // ---- Direction predictor agreement (conditional + unconditional) ----
+    if (!single_dir_wrong && !multi_dir_wrong)       ++sim_stats.dir_both_correct;
+    else if (single_dir_wrong && multi_dir_wrong)    ++sim_stats.dir_both_wrong;
+    else if (!single_dir_wrong && multi_dir_wrong)   ++sim_stats.dir_sc_correct_mc_wrong;
+    else                                             ++sim_stats.dir_mc_correct_sc_wrong;
+
+    // ---- BTB target agreement ----
+    if (!single_target_wrong && !multi_target_wrong)       ++sim_stats.btb_both_correct;
+    else if (single_target_wrong && multi_target_wrong)    ++sim_stats.btb_both_wrong;
+    else if (!single_target_wrong && multi_target_wrong)   ++sim_stats.btb_sc_correct_mc_wrong;
+    else                                                   ++sim_stats.btb_mc_correct_sc_wrong;
+
+
+
+
     unsigned penalty = 0;
     if (single_wrong || multi_wrong) {
         if (arch_instr.branch_prediction == arch_instr.branch_prediction_multi) {
@@ -402,10 +489,13 @@ bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
       sim_stats.total_rob_occupancy_at_branch_mispredict += std::size(ROB);
       sim_stats.branch_type_misses[arch_instr.branch_type]++;
       if (!warmup) {
-        fetch_resume_cycle = std::numeric_limits<uint64_t>::max();
+        // Apply penalty immediately at fetch; do not wait for execute/decode
+        fetch_resume_cycle = current_cycle + penalty;
+        // fetch_resume_cycle = std::numeric_limits<uint64_t>::max();
         stop_fetch = true;
         arch_instr.branch_mispredicted = 1;
         arch_instr.mispredict_penalty = penalty;
+        arch_instr.mispredict_detect_cycle = current_cycle;
       }
     } else {
 #ifdef TWO_BLOCK_AHEAD_FETCH
@@ -594,7 +684,13 @@ long O3_CPU::decode_instruction()
         db_entry.branch_mispredicted = 0;
         // pay misprediction penalty
         // this->fetch_resume_cycle = this->current_cycle + BRANCH_MISPREDICT_PENALTY;
-        this->fetch_resume_cycle = this->current_cycle + db_entry.mispredict_penalty;;
+        // this->fetch_resume_cycle = this->current_cycle + db_entry.mispredict_penalty;
+
+        // ---- measure L ----
+        uint64_t L = this->current_cycle - db_entry.mispredict_detect_cycle;
+        this->sim_stats.mispredict_penalty_latency_sum += L;
+        ++this->sim_stats.mispredict_penalty_count;
+        ++this->sim_stats.mispredict_penalty_at_decode;
       }
     }
 
@@ -844,9 +940,15 @@ void O3_CPU::do_complete_execution(ooo_model_instr& instr)
       dependent.scheduled = COMPLETED;
   }
 
-  if (instr.branch_mispredicted)
+  if (instr.branch_mispredicted) {
     // fetch_resume_cycle = current_cycle + BRANCH_MISPREDICT_PENALTY;
-    fetch_resume_cycle = current_cycle + instr.mispredict_penalty;
+    // fetch_resume_cycle = current_cycle + instr.mispredict_penalty;
+    // ---- measure L ----
+    uint64_t L = current_cycle - instr.mispredict_detect_cycle;
+    sim_stats.mispredict_penalty_latency_sum += L;
+    ++sim_stats.mispredict_penalty_count;
+    ++sim_stats.mispredict_penalty_at_execute;
+  }
 }
 
 long O3_CPU::complete_inflight_instruction()

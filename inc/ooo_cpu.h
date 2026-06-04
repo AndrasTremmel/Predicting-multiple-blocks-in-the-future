@@ -55,7 +55,7 @@
 // The actual fetch block counters will reset when a new cache line is reached.
 #define ACTUAL_BLOCK_RESET_AT_CACHE_LINE
 
-//#define TWO_BLOCK_AHEAD_FETCH
+#define TWO_BLOCK_AHEAD_FETCH
 
 
 enum STATUS { INFLIGHT = 1, COMPLETED = 2 };
@@ -97,6 +97,28 @@ struct cpu_stats {
   // Stat 4: pure fetch block (no L-bit, no cache line boundary, cut at 1st taken branch or FETCH_WIDTH)
   std::map<std::pair<uint64_t, bool>, uint64_t> up_to_taken_branch_branch_distribution;
   std::map<uint64_t, uint64_t> up_to_taken_branch_size_distribution;
+
+
+  // --- Predictor accuracy statistics ---
+  uint64_t sc_total = 0, sc_correct = 0;
+  uint64_t mc_total = 0, mc_correct = 0;
+  uint64_t sc_dir_total = 0, sc_dir_correct = 0;
+  uint64_t mc_dir_total = 0, mc_dir_correct = 0;
+  uint64_t sc_btb_total = 0, sc_btb_correct = 0;
+  uint64_t mc_btb_total = 0, mc_btb_correct = 0;
+
+  // --- Single vs Multi agreement counters ---
+  uint64_t dir_both_correct = 0, dir_both_wrong = 0;
+  uint64_t dir_sc_correct_mc_wrong = 0, dir_mc_correct_sc_wrong = 0;
+
+  uint64_t btb_both_correct = 0, btb_both_wrong = 0;
+  uint64_t btb_sc_correct_mc_wrong = 0, btb_mc_correct_sc_wrong = 0;
+
+  uint64_t mispredict_penalty_latency_sum = 0;
+  uint64_t mispredict_penalty_count       = 0;
+  uint64_t mispredict_penalty_at_decode   = 0;
+  uint64_t mispredict_penalty_at_execute  = 0;
+
 
   uint64_t instrs() const { return end_instrs - begin_instrs; }
   uint64_t cycles() const { return end_cycles - begin_cycles; }
