@@ -84,6 +84,19 @@ void champsim::plain_printer::print(O3_CPU::stats_type stats)
                stats.name, key.first, key.second ? "yes" : " no", count);
   }
 
+  // Stat 6: Two taken branch fetch block size distribution
+  fmt::print(stream, "{}  Up to two taken branch fetch block size distribution (cut at 2nd taken branch or FETCH_WIDTH):\n", stats.name);
+  for (const auto& [size, count] : stats.up_to_two_taken_branch_size_distribution) {
+    fmt::print(stream, "{}    size: {:2d}  count: {:10d}\n", stats.name, size, count);
+  }
+
+  // Stat 7: Two taken branch fetch block branch distribution
+  fmt::print(stream, "{} UP to two taken branch fetch block branch distribution (cut at 2nd taken branch or FETCH_WIDTH):\n", stats.name);
+  for (const auto& [key, count] : stats.up_to_two_taken_branch_branch_distribution) {
+    fmt::print(stream, "{}    branches: {:2d}  ends_with_branch: {}  count: {:10d}\n",
+               stats.name, key.first, key.second ? "yes" : " no", count);
+  }
+
   
   fmt::print(stream, "\n");
 }

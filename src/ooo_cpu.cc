@@ -102,6 +102,12 @@ void O3_CPU::begin_phase()
   up_to_taken_branch_block_branches_counter = 0;
   up_to_taken_branch_block_last_was_branch  = false;
 
+  // reset two-taken-branch fetch block counters
+  up_to_two_taken_branch_block_size_counter     = 0;
+  up_to_two_taken_branch_block_branches_counter = 0;
+  up_to_two_taken_branch_block_taken_counter    = 0;
+  up_to_two_taken_branch_block_last_was_branch  = false;
+
   // Also reset the conditional-branch taken-history so phase stats stay clean.
   conditional_predicted_taken_ips.clear();
 }
@@ -161,7 +167,7 @@ void O3_CPU::initialize_instruction()
     if (current_is_branch)
       ++one_block_ahead_branches_counter;
 
-    bool cut_here = current_is_taken_branch || (one_block_ahead_block_size_counter == static_cast<uint64_t>(FETCH_WIDTH));
+    bool cut_here = current_is_taken_branch || (one_block_ahead_block_size_counter == std::numeric_limits<uint64_t>::max());
 
     // Cut on conditional not-taken branches that were previously predicted taken
     if (!cut_here && current_is_branch && !current_is_taken_branch
@@ -271,7 +277,7 @@ void O3_CPU::initialize_instruction()
     if (is_stop_branch)
       ++two_block_ahead_stop_branches;
 
-    if (two_block_ahead_stop_branches == 2 || two_block_ahead_counter == static_cast<uint64_t>(FETCH_WIDTH)) {
+    if (two_block_ahead_stop_branches == 2 || two_block_ahead_counter == std::numeric_limits<uint64_t>::max()) {
       sim_stats.two_block_ahead_size_distribution[two_block_ahead_counter]++;
       two_block_ahead_counter       = 0;
       two_block_ahead_stop_branches = 0;
@@ -284,12 +290,30 @@ void O3_CPU::initialize_instruction()
     if (current_is_branch)
       ++up_to_taken_branch_block_branches_counter;
 
-    if (current_is_taken_branch || up_to_taken_branch_block_size_counter == static_cast<uint64_t>(FETCH_WIDTH)) {
+    if (current_is_taken_branch || up_to_taken_branch_block_size_counter == std::numeric_limits<uint64_t>::max()) {
       sim_stats.up_to_taken_branch_branch_distribution[{up_to_taken_branch_block_branches_counter, up_to_taken_branch_block_last_was_branch}]++;
       sim_stats.up_to_taken_branch_size_distribution[up_to_taken_branch_block_size_counter]++;
       up_to_taken_branch_block_size_counter     = 0;
       up_to_taken_branch_block_branches_counter = 0;
       up_to_taken_branch_block_last_was_branch  = false;
+    }
+
+
+    // STATS: two taken branch fetch block (cut on 2nd truly taken branch or FETCH_WIDTH)
+    ++up_to_two_taken_branch_block_size_counter;
+    up_to_two_taken_branch_block_last_was_branch = current_is_branch;
+    if (current_is_branch)
+      ++up_to_two_taken_branch_block_branches_counter;
+    if (current_is_taken_branch)
+      ++up_to_two_taken_branch_block_taken_counter;
+
+    if (up_to_two_taken_branch_block_taken_counter == 2 || up_to_two_taken_branch_block_size_counter == std::numeric_limits<uint64_t>::max()) {
+      sim_stats.up_to_two_taken_branch_branch_distribution[{up_to_two_taken_branch_block_branches_counter, up_to_two_taken_branch_block_last_was_branch}]++;
+      sim_stats.up_to_two_taken_branch_size_distribution[up_to_two_taken_branch_block_size_counter]++;
+      up_to_two_taken_branch_block_size_counter     = 0;
+      up_to_two_taken_branch_block_branches_counter = 0;
+      up_to_two_taken_branch_block_taken_counter    = 0;
+      up_to_two_taken_branch_block_last_was_branch  = false;
     }
 
     // Track conditional branches that have been predicted taken at least once.
@@ -348,23 +372,24 @@ bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
       fmt::print("[BRANCH] instr_id: {} ip: {:#x} taken: {}\n", arch_instr.instr_id, arch_instr.ip, arch_instr.branch_taken);
     }
 
-    // call code prefetcher every time the branch predictor is used
-    l1i->impl_prefetcher_branch_operate(arch_instr.ip, arch_instr.branch_type, predicted_branch_target);
+    // // call code prefetcher every time the branch predictor is used
+    // l1i->impl_prefetcher_branch_operate(arch_instr.ip, arch_instr.branch_type, predicted_branch_target);
 
-    if (predicted_branch_target != arch_instr.branch_target
-        || (((arch_instr.branch_type == BRANCH_CONDITIONAL) || (arch_instr.branch_type == BRANCH_OTHER))
-            && arch_instr.branch_taken != arch_instr.branch_prediction)) { // conditional branches are re-evaluated at decode when the target is computed
-      sim_stats.total_rob_occupancy_at_branch_mispredict += std::size(ROB);
-      sim_stats.branch_type_misses[arch_instr.branch_type]++;
-      if (!warmup) {
-        fetch_resume_cycle = std::numeric_limits<uint64_t>::max();
-        stop_fetch = true;
-        arch_instr.branch_mispredicted = 1;
-      }
-    } else {
-      stop_fetch = arch_instr.branch_taken; // if correctly predicted taken, then we can't fetch anymore instructions this cycle
-    }
+    // if (predicted_branch_target != arch_instr.branch_target
+    //     || (((arch_instr.branch_type == BRANCH_CONDITIONAL) || (arch_instr.branch_type == BRANCH_OTHER))
+    //         && arch_instr.branch_taken != arch_instr.branch_prediction)) { // conditional branches are re-evaluated at decode when the target is computed
+    //   sim_stats.total_rob_occupancy_at_branch_mispredict += std::size(ROB);
+    //   sim_stats.branch_type_misses[arch_instr.branch_type]++;
+    //   if (!warmup) {
+    //     fetch_resume_cycle = std::numeric_limits<uint64_t>::max();
+    //     stop_fetch = true;
+    //     arch_instr.branch_mispredicted = 1;
+    //   }
+    // } else {
+    //   stop_fetch = arch_instr.branch_taken; // if correctly predicted taken, then we can't fetch anymore instructions this cycle
+    // }
 
+    stop_fetch = arch_instr.branch_taken; // if correctly predicted taken, then we can't fetch anymore instructions this cycle
 
 
     impl_update_btb(arch_instr.ip, arch_instr.branch_target, arch_instr.branch_taken, arch_instr.branch_type);
