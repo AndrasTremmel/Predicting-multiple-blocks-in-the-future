@@ -30,7 +30,7 @@
 #include <fmt/core.h>
 #include <fmt/ranges.h>
 
-#define MULTI_CYCLE_PREDICTOR_LATENCY 4
+#define MULTI_CYCLE_PREDICTOR_LATENCY 3
 #define BRANCH_MISPREDICTION_PENALTY  16
 
 std::chrono::seconds elapsed_time();
@@ -180,7 +180,7 @@ void O3_CPU::end_phase(unsigned finished_cpu)
 void O3_CPU::initialize_instruction()
 {
 #ifdef TWO_BLOCK_AHEAD_FETCH
-  auto max_fetch_budget = 2 * FETCH_WIDTH;
+  auto max_fetch_budget = FETCH_WIDTH;
 #else
   auto max_fetch_budget = FETCH_WIDTH;
 #endif
