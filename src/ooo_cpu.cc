@@ -480,8 +480,8 @@ bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
         } else {
             // They differ → penalty depends on whether multi is correct
             penalty = multi_wrong
-                ? BRANCH_MISPREDICTION_PENALTY + MULTI_CYCLE_PREDICTOR_LATENCY   // multi wrong  → N + 3
-                : MULTI_CYCLE_PREDICTOR_LATENCY;                               // multi correct → 3
+                ? BRANCH_MISPREDICTION_PENALTY                      // multi wrong  → N
+                : MULTI_CYCLE_PREDICTOR_LATENCY;                    // multi correct → 3
         }
     }
      

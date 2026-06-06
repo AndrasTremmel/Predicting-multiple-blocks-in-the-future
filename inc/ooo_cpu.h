@@ -55,7 +55,7 @@
 // The actual fetch block counters will reset when a new cache line is reached.
 #define ACTUAL_BLOCK_RESET_AT_CACHE_LINE
 
-#define TWO_BLOCK_AHEAD_FETCH
+//#define TWO_BLOCK_AHEAD_FETCH
 
 
 enum STATUS { INFLIGHT = 1, COMPLETED = 2 };
