@@ -277,7 +277,7 @@ void O3_CPU::initialize_instruction()
     if (is_stop_branch)
       ++two_block_ahead_stop_branches;
 
-    if (two_block_ahead_stop_branches == 2 || two_block_ahead_counter == static_cast<uint64_t>(FETCH_WIDTH)) {
+    if (two_block_ahead_stop_branches == 2 || two_block_ahead_counter == static_cast<uint64_t>(2 * FETCH_WIDTH)) {
       sim_stats.two_block_ahead_size_distribution[two_block_ahead_counter]++;
       two_block_ahead_counter       = 0;
       two_block_ahead_stop_branches = 0;
@@ -307,7 +307,7 @@ void O3_CPU::initialize_instruction()
     if (current_is_taken_branch)
       ++up_to_two_taken_branch_block_taken_counter;
 
-    if (up_to_two_taken_branch_block_taken_counter == 2 || up_to_two_taken_branch_block_size_counter == static_cast<uint64_t>(FETCH_WIDTH)) {
+    if (up_to_two_taken_branch_block_taken_counter == 2 || up_to_two_taken_branch_block_size_counter == static_cast<uint64_t>(2 * FETCH_WIDTH)) {
       sim_stats.up_to_two_taken_branch_branch_distribution[{up_to_two_taken_branch_block_branches_counter, up_to_two_taken_branch_block_last_was_branch}]++;
       sim_stats.up_to_two_taken_branch_size_distribution[up_to_two_taken_branch_block_size_counter]++;
       up_to_two_taken_branch_block_size_counter     = 0;
