@@ -29,7 +29,7 @@ enum class mbtb_transition : uint8_t { T, N, R };
 
 struct mbtb_entry_t {
   uint64_t ip_tag = 0;
-  uint64_t block_start = 0;   // Ai: block start     -> index   [NEW]
+  uint64_t block_start = 0;  
   uint64_t target = 0;
   branch_info type = branch_info::ALWAYS_TAKEN;
   mbtb_transition transition = mbtb_transition::N;
@@ -44,7 +44,7 @@ struct sas_record_t {
   uint64_t target = 0;
   branch_info type = branch_info::ALWAYS_TAKEN;
   bool valid = false;
-  uint64_t block_start = 0;   // [NEW] Ai of the call's block
+  uint64_t block_start = 0; 
 };
 
 struct pending_mbtb_pred_t {
@@ -218,7 +218,7 @@ std::pair<uint64_t, uint8_t> O3_CPU::btb_prediction(uint64_t ip)
   bool was_ret   = g_ctx.LAST_BRANCH_WAS_RETURN[this];
   auto& pend_sas = g_ctx.PENDING_SAS_ENTRY[this];
   uint64_t pr_call_ip  = g_ctx.LAST_RETURN_CALL_IP[this];
-  uint64_t ind_ctx = OPTIMIZATION_ON ? g_ctx.LAST_INDIRECT_TARGET[this] : 0;   // NEW
+  uint64_t ind_ctx = OPTIMIZATION_ON ? g_ctx.LAST_INDIRECT_TARGET[this] : 0;  
 
   uint64_t predicted_target = 0;
   uint8_t  always_taken     = false;
@@ -336,12 +336,12 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
     else                  stats.per_prev_type_correct[pti]++;
   }
 
-  // ---- CALL: RAS + SAS push (UNCHANGED) --------------------------------
+  // ---- CALL: RAS + SAS push --------------------------------
   if (branch_type == BRANCH_DIRECT_CALL || branch_type == BRANCH_INDIRECT_CALL) {
     g_ctx.RAS[this].push_back(ip);
 
     sas_record_t snap{};
-    snap.block_start = cur_block_start;                           // [NEW]
+    snap.block_start = cur_block_start;                           
     auto entry = g_ctx.MBTB.at(this).check_hit({ip, cur_block_start, 0, branch_info::ALWAYS_TAKEN, mbtb_transition::R, 0});
     if (entry.has_value()) {
       snap.target = entry->target;
@@ -357,7 +357,7 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
     if (std::size(g_ctx.SAS[this]) > SAS_SIZE) g_ctx.SAS[this].pop_front();
   }
 
-  // ---- RETURN: pop RAS + SAS (UNCHANGED) -------------------------------
+  // ---- RETURN: pop RAS + SAS -------------------------------
   bool         just_handled_return = false;
   uint64_t     popped_call_ip      = 0;
   sas_record_t popped_sas{};
@@ -381,7 +381,7 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
     just_handled_return = true;
   }
 
-  // ---- Indirect target / history (UNCHANGED) ---------------------------
+  // ---- Indirect target / history ---------------------------
   auto prev_ip    = g_ctx.LAST_BRANCH_IP[this];
   auto prev_trans = g_ctx.LAST_TRANSITION[this] == mbtb_transition::R ? mbtb_transition::T : g_ctx.LAST_TRANSITION[this];
   auto& pend_sas = g_ctx.PENDING_SAS_ENTRY[this];
@@ -408,7 +408,7 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
   else if (branch_type == BRANCH_RETURN)                                          type = branch_info::RETURN;
   else if (branch_type == BRANCH_CONDITIONAL || branch_type == BRANCH_OTHER)      type = branch_info::CONDITIONAL;
 
-  // ---- MBTB write (UNCHANGED) ------------------------------------------
+  // ---- MBTB write ------------------------------------------
   if (prev_was_return) {
     if (branch_target != 0) {
       auto opt_entry = g_ctx.MBTB.at(this).check_hit({pr_call_ip, pend_sas.block_start, branch_target, type, mbtb_transition::R, 0});
@@ -422,7 +422,7 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
     prev_trans = g_ctx.LAST_TRANSITION[this] == mbtb_transition::R
                      ? mbtb_transition::T : g_ctx.LAST_TRANSITION[this];
 
-    uint64_t ind_ctx = OPTIMIZATION_ON ? g_ctx.LAST_INDIRECT_TARGET[this] : 0;   // NEW
+    uint64_t ind_ctx = OPTIMIZATION_ON ? g_ctx.LAST_INDIRECT_TARGET[this] : 0;  
 
     auto opt_entry = g_ctx.MBTB.at(this).check_hit({prev_ip, prev_block_start, branch_target, type, prev_trans, ind_ctx});
     if (opt_entry.has_value()) {

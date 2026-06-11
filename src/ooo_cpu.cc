@@ -102,6 +102,12 @@ void O3_CPU::begin_phase()
   up_to_taken_branch_block_branches_counter = 0;
   up_to_taken_branch_block_last_was_branch  = false;
 
+  // reset two-taken-branch fetch block counters
+  up_to_two_taken_branch_block_size_counter     = 0;
+  up_to_two_taken_branch_block_branches_counter = 0;
+  up_to_two_taken_branch_block_taken_counter    = 0;
+  up_to_two_taken_branch_block_last_was_branch  = false;
+
   // Also reset the conditional-branch taken-history so phase stats stay clean.
   conditional_predicted_taken_ips.clear();
 }
@@ -271,7 +277,7 @@ void O3_CPU::initialize_instruction()
     if (is_stop_branch)
       ++two_block_ahead_stop_branches;
 
-    if (two_block_ahead_stop_branches == 2 || two_block_ahead_counter == static_cast<uint64_t>(FETCH_WIDTH)) {
+    if (two_block_ahead_stop_branches == 2 || two_block_ahead_counter == static_cast<uint64_t>(2 * FETCH_WIDTH)) {
       sim_stats.two_block_ahead_size_distribution[two_block_ahead_counter]++;
       two_block_ahead_counter       = 0;
       two_block_ahead_stop_branches = 0;
@@ -290,6 +296,24 @@ void O3_CPU::initialize_instruction()
       up_to_taken_branch_block_size_counter     = 0;
       up_to_taken_branch_block_branches_counter = 0;
       up_to_taken_branch_block_last_was_branch  = false;
+    }
+
+
+    // STATS: two taken branch fetch block (cut on 2nd truly taken branch or FETCH_WIDTH)
+    ++up_to_two_taken_branch_block_size_counter;
+    up_to_two_taken_branch_block_last_was_branch = current_is_branch;
+    if (current_is_branch)
+      ++up_to_two_taken_branch_block_branches_counter;
+    if (current_is_taken_branch)
+      ++up_to_two_taken_branch_block_taken_counter;
+
+    if (up_to_two_taken_branch_block_taken_counter == 2 || up_to_two_taken_branch_block_size_counter == static_cast<uint64_t>(2 * FETCH_WIDTH)) {
+      sim_stats.up_to_two_taken_branch_branch_distribution[{up_to_two_taken_branch_block_branches_counter, up_to_two_taken_branch_block_last_was_branch}]++;
+      sim_stats.up_to_two_taken_branch_size_distribution[up_to_two_taken_branch_block_size_counter]++;
+      up_to_two_taken_branch_block_size_counter     = 0;
+      up_to_two_taken_branch_block_branches_counter = 0;
+      up_to_two_taken_branch_block_taken_counter    = 0;
+      up_to_two_taken_branch_block_last_was_branch  = false;
     }
 
     // Track conditional branches that have been predicted taken at least once.
@@ -364,7 +388,6 @@ bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
     } else {
       stop_fetch = arch_instr.branch_taken; // if correctly predicted taken, then we can't fetch anymore instructions this cycle
     }
-
 
 
     impl_update_btb(arch_instr.ip, arch_instr.branch_target, arch_instr.branch_taken, arch_instr.branch_type);

@@ -32,7 +32,7 @@
 typedef unsigned int uns;
 
 
-#define AHEAD_DISTANCE 10
+#define AHEAD_DISTANCE 6
 #define USE_2_BIT_COUNTER_IN_L0 1
 #define FFP_HASH_DIR 1      // used only when SND_TAG_NO_PRED = 2
 #define FFP_HASH_DIR_ONLY  0//((1 << AHEAD_DISTANCE) ==  SND_TAG_NO_PRED)    // use PC as well for missing history hash computation
@@ -596,7 +596,7 @@ bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc, uint6
         if(element.tage_pred_used[fft_picker]){
           //std::cout << "Prediction has already been used..." << std::endl;
           // Happens when we use the prediction queue entry for a non-branch instruction 
-          // TODO: We could set back the corresponding tage_pred_used entry back to false
+          // We could set back the corresponding tage_pred_used entry back to false
           // but we dont use this field anywhere else so it doesnt really matter
         } else{
           element.tage_pred_used[fft_picker] = true;
@@ -669,8 +669,7 @@ bool Tage_SC_L<CONFIG>::get_prediction(uint32_t branch_id, uint64_t br_pc, uint6
   temp_entry.br_pc = br_pc;
   temp_entry.insert_cycle = current_cycle;
   temp_entry.branch_id = branch_id + AHEAD_DISTANCE;
-  // TODO: check if we actually need/use this field
-  //temp_entry.is_ret= op->table_info->cf_type == CF_RET;
+
   future_tage_response_delay_queue.push_back(temp_entry);
   //std::cout << "Added predicton queue entry to queue" << std::endl;
 

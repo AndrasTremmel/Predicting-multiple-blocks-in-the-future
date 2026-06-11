@@ -46,14 +46,13 @@
 
 
 // --- Actual fetch block macro toggles ---
-// Uncomment the line below to enable:
 // A conditional branch that is not-taken now but was previously predicted taken
 // will NOT cut the actual fetch block if it is the LAST branch in its cache line.
-#define L_BIT_OPTIMIZATION
+//#define L_BIT_OPTIMIZATION
 
-// Uncomment the line below to enable:
+
 // The actual fetch block counters will reset when a new cache line is reached.
-#define ACTUAL_BLOCK_RESET_AT_CACHE_LINE
+//#define ACTUAL_BLOCK_RESET_AT_CACHE_LINE
 
 
 enum STATUS { INFLIGHT = 1, COMPLETED = 2 };
@@ -95,6 +94,9 @@ struct cpu_stats {
   // Stat 4: pure fetch block (no L-bit, no cache line boundary, cut at 1st taken branch or FETCH_WIDTH)
   std::map<std::pair<uint64_t, bool>, uint64_t> up_to_taken_branch_branch_distribution;
   std::map<uint64_t, uint64_t> up_to_taken_branch_size_distribution;
+  // Stat 5: two taken branch fetch block (cut at 2nd truly taken branch or FETCH_WIDTH)
+  std::map<std::pair<uint64_t, bool>, uint64_t> up_to_two_taken_branch_branch_distribution;
+  std::map<uint64_t, uint64_t> up_to_two_taken_branch_size_distribution;
 
   uint64_t instrs() const { return end_instrs - begin_instrs; }
   uint64_t cycles() const { return end_cycles - begin_cycles; }
@@ -188,6 +190,11 @@ public:
   uint64_t up_to_taken_branch_block_size_counter     = 0;
   uint64_t up_to_taken_branch_block_branches_counter = 0;
   bool     up_to_taken_branch_block_last_was_branch  = false;
+
+  uint64_t up_to_two_taken_branch_block_size_counter     = 0;
+  uint64_t up_to_two_taken_branch_block_branches_counter = 0;
+  uint64_t up_to_two_taken_branch_block_taken_counter    = 0;
+  bool     up_to_two_taken_branch_block_last_was_branch  = false;
 
   const long IN_QUEUE_SIZE = 2 * FETCH_WIDTH;
   std::deque<ooo_model_instr> input_queue;
