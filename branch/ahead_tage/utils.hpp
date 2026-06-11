@@ -214,9 +214,6 @@ private:
     uint32_t alloc_id_;  // Next branch ID to allocate
 };
 
-
-
-
 }  // namespace tagescl
 
 #endif  // SPEC_TAGE_SC_L_UTILS_HPP_

@@ -261,7 +261,7 @@ void O3_CPU::update_btb(uint64_t ip, uint64_t branch_target, uint8_t taken, uint
     else                  stats.per_prev_type_correct[pti]++;
   }
 
-  // ---- RAS / state updates (UNCHANGED) ---------------------------------
+  // ---- RAS / state updates ---------------------------------
   if (branch_type == BRANCH_DIRECT_CALL || branch_type == BRANCH_INDIRECT_CALL) {
     g_ctx.RAS[this].push_back(ip);
     if (std::size(g_ctx.RAS[this]) > RAS_SIZE) g_ctx.RAS[this].pop_front();

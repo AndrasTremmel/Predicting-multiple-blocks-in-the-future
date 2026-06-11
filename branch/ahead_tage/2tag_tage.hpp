@@ -586,16 +586,13 @@ class Tage_2tag{
           }
         }
 
-        // REVISIT: this the repeat of the code above on a different
-        // bank. The
-        // code should be abstracted in a function.
         if(!done) {
           i = (allocation_bank ^ 1) + 1;
           if(tables_enabled_.arr[i]) {
             Tagged_Entry& bank_entry = tagged_table_ptrs_[i][indices[i]];
 
             if(bank_entry.useful.get() == 0) {
-              // *** PROMOTION CHECK ***
+              
               // Same ahead history (primary tag match) but different missing-history
               // pattern (secondary tag mismatch): do NOT overwrite. Treat this slot
               // as occupied and let the loop promote to a higher-history table.
