@@ -1,3 +1,15 @@
+# About the Repository
+This repository contains all my code implementations for my final year MEng Computing project as part of my degree at Imperial College London. 
+The base ChampSim implementation of the repository was cloned from a ChampSim fork repository: https://github.com/agusnt/ChampSim.
+All my implementations were added on top of the cloned ChampSim codebase.
+
+# New predictor and BTB designs
+All new branch predictor designs were added to the /branch folder and all the new BTB implementations to the /btb folder as separate modules. 
+
+# IPC analysis
+The IPC analysis codebase can be found on the ipc-measuring-with-multi-level-predictors branch. It was not merged back into master since it has a slightly modified ChampSim working that would interfere with proper accuracy and MPKI calculation of master. With this structure, master allows proper accuracy and MPKI extraction, and the ipc-measuring-with-multi-level-predictors branch provides realistic IPC measurement for hierarchical predictor designs.
+
+
 # ChampSim
 
 ![GitHub](https://img.shields.io/github/license/ChampSim/ChampSim)
