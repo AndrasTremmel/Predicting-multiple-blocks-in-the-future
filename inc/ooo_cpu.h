@@ -46,12 +46,11 @@
 
 
 // --- Actual fetch block macro toggles ---
-// Uncomment the line below to enable:
 // A conditional branch that is not-taken now but was previously predicted taken
 // will NOT cut the actual fetch block if it is the LAST branch in its cache line.
 //#define L_BIT_OPTIMIZATION
 
-// Uncomment the line below to enable:
+
 // The actual fetch block counters will reset when a new cache line is reached.
 //#define ACTUAL_BLOCK_RESET_AT_CACHE_LINE
 
